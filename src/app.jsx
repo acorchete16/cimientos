@@ -425,6 +425,7 @@ function App(){
   useEffect(()=>save(data), [data]);
   useEffect(()=>{ try{ navigator.storage && navigator.storage.persist && navigator.storage.persist(); }catch(e){} }, []);
   const [backupMsg, setBackupMsg] = useState(null);
+  const { prices, err: pricesErr } = usePrices();
   const markBackup = () => setData(d=>({ ...d, meta:{ ...(d.meta||{}), lastBackup:new Date().toISOString() } }));
   const quickBackup = async () => {
     try { await shareBackup(data); markBackup(); setBackupMsg('Copia guardada'); setTimeout(()=>setBackupMsg(null), 2500); }
@@ -561,8 +562,16 @@ function App(){
   const catsByKind = (kind) => data.categories.filter(c=>c.kind===kind);
 
   const addOrUpdateTxn = (txn) => {
-    if (txn.id) setData(d=>({ ...d, txns: d.txns.map(t=> t.id===txn.id ? { ...t, ...txn } : t) }));
-    else setData(d=>({ ...d, txns:[...d.txns, { ...txn, id:uid() }] }));
+    let t2 = txn;
+    if (txn.holdingId) {
+      const h = (data.holdings||[]).find(x=>x.id===txn.holdingId);
+      const live = h ? liveOf(h, prices) : null;
+      const old = txn.id ? data.txns.find(t=>t.id===txn.id) : null;
+      const unitPrice = (old && old.unitPrice) || (live ? live.priceEUR : null);
+      if (unitPrice) t2 = { ...txn, unitPrice, units: Number(txn.amount)/unitPrice };
+    }
+    if (t2.id) setData(d=>({ ...d, txns: d.txns.map(t=> t.id===t2.id ? { ...t, ...t2 } : t) }));
+    else setData(d=>({ ...d, txns:[...d.txns, { ...t2, id:uid() }] }));
   };
   const deleteTxn = (id) => setData(d=>({ ...d, txns: d.txns.filter(t=>t.id!==id) }));
   const addCategory = (cat) => setData(d=>({ ...d, categories:[...d.categories, cat] }));
@@ -1022,6 +1031,11 @@ function App(){
         </React.Fragment>
       )}
 
+      {tab==='mercado' && (
+        <CarteraTab data={data} setData={setData} prices={prices} pricesErr={pricesErr} atlasUrl={atlasUrl}
+          onAporta={(h)=>setAddOpen({ type:'expense', catId:(data.categories.find(c=>c.kind==='inversion')||data.categories[0]).id, holdingId:h.id, note:h.name })}/>
+      )}
+
       <Bats/>
       <nav className="bottom-nav">
         <div className="bottom-nav-inner">
@@ -1029,7 +1043,7 @@ function App(){
           <button className={`nav-btn ${tab==='plan'?'active':''}`} onClick={()=>setTab('plan')}><Icon name="navPlan"/>Plan</button>
           <button className="fab" aria-label="Apuntar movimiento" onClick={()=>setAddOpen({ type:'expense' })}><Icon name="plus"/></button>
           <button className={`nav-btn ${tab==='historico'?'active':''}`} onClick={()=>setTab('historico')}><Icon name="navAcum"/>Acumulado</button>
-          <a className="nav-btn" href={atlasUrl} target="_blank" rel="noopener"><Icon name="globe"/>Mercado</a>
+          <button className={`nav-btn ${tab==='mercado'?'active':''}`} onClick={()=>setTab('mercado')}><Icon name="globe"/>Mercado</button>
         </div>
       </nav>
 
@@ -1103,10 +1117,10 @@ function AddTxnModal({ initial, categories, usage, onClose, onSave, onDelete, on
   const n = parseAmount(amount);
   const submit = () => {
     if(!n || n<=0 || !catId) return;
-    onSave({ ...(isEdit ? { id: initial.id } : {}), ...(initial.goalId ? { goalId: initial.goalId } : {}), type, amount:n, catId, note:note.trim(), date });
+    onSave({ ...(isEdit ? { id: initial.id } : {}), ...(initial.goalId ? { goalId: initial.goalId } : {}), ...(initial.holdingId ? { holdingId: initial.holdingId } : {}), type, amount:n, catId, note:note.trim(), date });
   };
   const cat = options.find(o=>o.id===catId);
-  const goalHint = initial.goalId ? ' · para tu objetivo' : '';
+  const goalHint = initial.goalId ? ' · para tu objetivo' : initial.holdingId ? ' · se suma a tu cartera' : '';
   const dateLabel = date===todayISO() ? 'Hoy' : dayLabel(date);
   const [ip, dp] = amount.split(',');
   const intPart = ip ? new Intl.NumberFormat('es-ES').format(Number(ip)) : '0';
@@ -1460,6 +1474,488 @@ function ScanReviewModal({ result, categories, existing, onClose, onSave }){
         {chosen.length ? `Guardar ${chosen.length} · ${total<0?'−':'+'}${fmtExact(Math.abs(total))}` : 'Marca algún movimiento'}
       </button>}
       <button className="btn btn-ghost" onClick={onClose}>{items.length ? 'Descartar' : 'Cerrar'}</button>
+    </Modal>
+  );
+}
+
+// ---------- Cartera: fondos, ETFs y acciones con precios automáticos ----------
+const HOLDING_TYPES = { fondo:'Fondo', etf:'ETF', accion:'Acción', cripto:'Cripto', otro:'Otro' };
+const HOLDING_COLORS = ['#FF9F43','#B48CFF','#5EC8D8','#8FD66A','#FF6FA5','#FFD166','#8E9BFF','#EF4B55'];
+const typeFromYahoo = (t) => t==='MUTUALFUND' ? 'fondo' : t==='ETF' ? 'etf' : t==='EQUITY' ? 'accion' : t==='CRYPTOCURRENCY' ? 'cripto' : 'otro';
+const fmt2 = (n) => new Intl.NumberFormat('es-ES',{style:'currency',currency:'EUR',minimumFractionDigits:2,maximumFractionDigits:2}).format(n||0);
+const pctStr = (p) => (p>0?'+':'') + (Math.round(p*100)/100).toLocaleString('es-ES',{minimumFractionDigits:2,maximumFractionDigits:2}) + ' %';
+const toEUR = (v, cur, fx) => {
+  if (v==null) return null;
+  if (cur==='USD') return fx && fx.EURUSD ? v / fx.EURUSD : null;
+  if (cur==='GBp') return null;
+  return v;
+};
+
+function usePrices(){
+  const [prices, setPrices] = useState(null);
+  const [err, setErr] = useState(null);
+  const load = async () => {
+    try {
+      const r = await fetch(`data/prices.json?t=${Date.now()}`, { cache:'no-store' });
+      if (!r.ok) throw new Error(r.status);
+      setPrices(await r.json()); setErr(null);
+    } catch(e) {
+      try { const c = await caches.match('data/prices.json', { ignoreSearch:true }); if (c) { setPrices(await c.json()); } } catch(_){}
+      setErr('Sin conexión: precios de la última vez');
+    }
+  };
+  useEffect(()=>{
+    load();
+    const id = setInterval(()=>{ if (document.visibilityState==='visible') load(); }, 5*60*1000);
+    const onVis = () => { if (document.visibilityState==='visible') load(); };
+    document.addEventListener('visibilitychange', onVis);
+    return () => { clearInterval(id); document.removeEventListener('visibilitychange', onVis); };
+  }, []);
+  return { prices, err, reload: load };
+}
+
+const sinceLabel = (iso) => {
+  if (!iso) return '';
+  const m = Math.round((Date.now() - new Date(iso).getTime())/60000);
+  if (m < 2) return 'ahora mismo';
+  if (m < 60) return `hace ${m} min`;
+  const h = Math.round(m/60);
+  if (h < 24) return `hace ${h} h`;
+  return `hace ${Math.round(h/24)} días`;
+};
+
+function liveOf(h, prices){
+  if (!prices || !h.priceId) return null;
+  const p = prices.items && prices.items[h.priceId];
+  if (!p || p.price==null) return null;
+  const fx = prices.fx;
+  const price = toEUR(p.price, p.currency, fx), prev = toEUR(p.prevClose, p.currency, fx);
+  if (price==null) return null;
+  const conv = (arr) => (arr||[]).map(([t,v])=>[t, toEUR(v, p.currency, fx)]);
+  return { ...p, priceEUR: price, prevEUR: prev, intradayEUR: conv(p.intraday), dailyEUR: conv(p.daily), weeklyEUR: conv(p.weekly), native: p.currency!=='EUR' };
+}
+
+function holdingStats(h, txns, prices){
+  const contribs = txns.filter(t=>t.holdingId===h.id && t.type==='expense');
+  const invested = Number(h.initInvested||0) + contribs.reduce((s,t)=>s+Number(t.amount),0);
+  const live = liveOf(h, prices);
+  let units = null, value;
+  if (live && h.initUnits!=null) {
+    units = Number(h.initUnits) + contribs.reduce((s,t)=>s+Number(t.units||0),0);
+    value = units * live.priceEUR;
+  } else {
+    const after = contribs.filter(t=>!h.manualDate || t.date > h.manualDate).reduce((s,t)=>s+Number(t.amount),0);
+    value = Number(h.manualValue||0) + after;
+  }
+  const gain = value - invested;
+  const dayChange = live && units!=null && live.prevEUR ? units*(live.priceEUR - live.prevEUR) : 0;
+  return { invested, value, gain, gainPct: invested>0 ? gain/invested*100 : 0, units, live, dayChange, contribs, avgPrice: units ? invested/units : null };
+}
+
+// Gráfico de línea con dedo/ratón para ver cada punto
+function LineChart({ points, height=180, color, baseline, fmtY=fmt2, fmtX }){
+  const [hover, setHover] = useState(null);
+  const ref = useRef(null);
+  const W = 340, H = height, pt = 14, pb = 22, pl = 2, pr = 2;
+  if (!points || points.length < 2) return <div className="chart-empty">No hay suficientes datos para este periodo.</div>;
+  const ys = points.map(p=>p[1]).concat(baseline!=null ? [baseline] : []);
+  let min = Math.min(...ys), max = Math.max(...ys);
+  if (max-min < 1e-9) { max += 1; min -= 1; }
+  const pad = (max-min)*0.08; min -= pad; max += pad;
+  const t0 = points[0][0], t1 = points[points.length-1][0];
+  const X = (t) => pl + (t1===t0 ? 0 : (t-t0)/(t1-t0))*(W-pl-pr);
+  const Y = (v) => pt + (1-(v-min)/(max-min))*(H-pt-pb);
+  const d = points.map(([t,v],i)=>`${i?'L':'M'}${X(t).toFixed(1)},${Y(v).toFixed(1)}`).join(' ');
+  const area = `${d} L${X(t1).toFixed(1)},${H-pb} L${X(t0).toFixed(1)},${H-pb} Z`;
+  const up = points[points.length-1][1] >= points[0][1];
+  const col = color || (up ? 'var(--accent)' : 'var(--danger)');
+  const gid = 'g' + Math.random().toString(36).slice(2,7);
+  const onMove = (e) => {
+    const r = ref.current.getBoundingClientRect();
+    const cx = ((e.touches ? e.touches[0].clientX : e.clientX) - r.left) / r.width * W;
+    let best = 0, bd = Infinity;
+    points.forEach(([t],i)=>{ const dd = Math.abs(X(t)-cx); if (dd<bd){ bd=dd; best=i; } });
+    setHover(best);
+  };
+  const hp = hover!=null ? points[hover] : null;
+  const defX = (t) => { const dt = new Date(t*1000); return dt.toLocaleDateString('es-ES',{day:'numeric',month:'short'}); };
+  const fx = fmtX || defX;
+  return (
+    <div className="lchart">
+      <div className="lchart-tip" style={{opacity: hp?1:0}}>
+        {hp && <><b className="num">{fmtY(hp[1])}</b><span>{fx(hp[0])}</span></>}
+      </div>
+      <svg ref={ref} viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" className="lchart-svg"
+        onMouseMove={onMove} onTouchStart={onMove} onTouchMove={onMove} onMouseLeave={()=>setHover(null)} onTouchEnd={()=>setTimeout(()=>setHover(null), 1200)}>
+        <defs><linearGradient id={gid} x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={col} stopOpacity="0.30"/><stop offset="100%" stopColor={col} stopOpacity="0"/></linearGradient></defs>
+        {baseline!=null && <><line x1={pl} x2={W-pr} y1={Y(baseline)} y2={Y(baseline)} stroke="var(--faint)" strokeDasharray="3 4" strokeWidth="1"/>
+          <text x={W-pr-2} y={Y(baseline)-4} textAnchor="end" className="lchart-axis">{fmtY(baseline)}</text></>}
+        <path d={area} fill={`url(#${gid})`}/>
+        <path d={d} fill="none" stroke={col} strokeWidth="2.2" strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke"/>
+        {hp && <><line x1={X(hp[0])} x2={X(hp[0])} y1={pt} y2={H-pb} stroke="var(--ink)" strokeOpacity="0.35" strokeWidth="1"/>
+          <circle cx={X(hp[0])} cy={Y(hp[1])} r="4.5" fill={col} stroke="var(--surface)" strokeWidth="2"/></>}
+        {!hp && <circle cx={X(t1)} cy={Y(points[points.length-1][1])} r="3.5" fill={col}/>}
+        <text x={pl} y={H-6} className="lchart-axis">{fx(t0)}</text>
+        <text x={W-pr} y={H-6} textAnchor="end" className="lchart-axis">{fx(t1)}</text>
+      </svg>
+    </div>
+  );
+}
+
+function Sparkline({ points, up }){
+  if (!points || points.length<2) return <svg className="spark"/>;
+  const ys = points.map(p=>p[1]); const min=Math.min(...ys), max=Math.max(...ys)||1;
+  const W=64,H=26; const d = points.map(([t,v],i)=>`${i?'L':'M'}${(i/(points.length-1)*W).toFixed(1)},${(H-2-(max-min?((v-min)/(max-min)):0.5)*(H-4)).toFixed(1)}`).join(' ');
+  return <svg className="spark" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none"><path d={d} fill="none" stroke={up?'var(--accent)':'var(--danger)'} strokeWidth="1.6" vectorEffect="non-scaling-stroke"/></svg>;
+}
+
+const RANGES = [
+  { k:'1D', label:'1D' }, { k:'1S', label:'1S' }, { k:'1M', label:'1M' }, { k:'6M', label:'6M' }, { k:'1A', label:'1A' }, { k:'5A', label:'5A' },
+];
+function seriesFor(live, k){
+  if (!live) return [];
+  const daily = live.dailyEUR || [];
+  if (k==='1D') return (live.intradayEUR||[]).length>=2 ? live.intradayEUR : daily.slice(-2);
+  if (k==='1S') return daily.slice(-6);
+  if (k==='1M') return daily.slice(-23);
+  if (k==='6M') return daily.slice(-127);
+  if (k==='1A') return daily;
+  return live.weeklyEUR || [];
+}
+
+// Ficha del producto con Gemini + búsqueda de Google (datos públicos, se guarda en el móvil)
+async function fetchFicha(h, live){
+  const key = getAIKey(); let model = getAIModel();
+  if (!key) throw new Error('NO_KEY');
+  if (!model) { model = await discoverModel(key); setAI(key, model); }
+  const prompt = `Busca información actual y fiable sobre este producto de inversión y devuelve SOLO un objeto JSON válido, sin texto antes ni después, sin markdown.
+Producto: ${h.name}${h.isin ? ` (ISIN ${h.isin})` : ''}${live && live.symbol ? `, símbolo ${live.symbol}` : ''}.
+Claves del JSON (usa null si no lo encuentras, no inventes):
+{"descripcion": "2-3 frases claras en español sobre qué es y en qué invierte",
+ "gestora": "", "indice": "índice que replica o null", "ter": "comisión anual en %, ej. 0,20 %", "tamano": "patrimonio del fondo, ej. 95.000 M€",
+ "dividendos": "Acumulación o Distribución", "replicacion": "Física/Sintética/Muestreo o null", "domicilio": "", "lanzamiento": "año",
+ "riesgo": "nivel de riesgo 1-7 (SRRI) si aparece", "n_posiciones": "número aproximado de empresas",
+ "top": [{"nombre":"", "peso":"%"}], "paises": [{"nombre":"", "peso":"%"}], "sectores": [{"nombre":"", "peso":"%"}],
+ "rent_1a": "rentabilidad último año %", "rent_5a_anual": "rentabilidad anualizada 5 años %",
+ "nota": "una frase con lo más importante a tener en cuenta (riesgo de concentración, divisa, etc.)"}
+Máximo 5 elementos en top, paises y sectores.`;
+  let res;
+  try {
+    res = await fetch(`${GEMINI}/models/${model}:generateContent?key=${encodeURIComponent(key)}`, { method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ contents:[{ role:'user', parts:[{ text: prompt }] }], tools:[{ google_search:{} }], generationConfig:{ temperature:0.2 } }) });
+  } catch(e){ throw new Error('Necesitas conexión para buscar la ficha.'); }
+  const out = await res.json().catch(()=>null);
+  if (!res.ok) throw new Error(aiError(res.status, out));
+  const cand = ((out||{}).candidates||[])[0] || {};
+  const text = (cand.content && cand.content.parts || []).map(p=>p.text||'').join('');
+  const m = text.match(/\{[\s\S]*\}/);
+  if (!m) throw new Error('No he podido montar la ficha. Prueba otra vez.');
+  let info; try { info = JSON.parse(m[0]); } catch(e){ throw new Error('La respuesta no era válida. Prueba otra vez.'); }
+  const sources = ((cand.groundingMetadata||{}).groundingChunks||[]).map(c=>c.web).filter(Boolean).slice(0,5).map(w=>({ title:w.title, uri:w.uri }));
+  return { ...info, sources, at: new Date().toISOString() };
+}
+
+function CarteraTab({ data, setData, prices, pricesErr, atlasUrl, openAdd, onAporta }){
+  const [range, setRange] = useState('1A');
+  const [openId, setOpenId] = useState(null);
+  const [form, setForm] = useState(null);
+  const holdings = data.holdings || [];
+  const stats = holdings.map((h,i)=>({ h, s: holdingStats(h, data.txns, prices), color: HOLDING_COLORS[i % HOLDING_COLORS.length] }));
+  const total = stats.reduce((a,x)=>a+x.s.value,0);
+  const invested = stats.reduce((a,x)=>a+x.s.invested,0);
+  const gain = total - invested;
+  const day = stats.reduce((a,x)=>a+x.s.dayChange,0);
+  const dayPct = total-day>0 ? day/(total-day)*100 : 0;
+
+  // Evolución de la cartera actual (participaciones de hoy × precio histórico)
+  const portfolioSeries = useMemo(()=>{
+    const map = new Map();
+    let anyLive = false;
+    stats.forEach(({h,s})=>{
+      if (!s.live || s.units==null) { return; }
+      anyLive = true;
+      seriesFor(s.live, range).forEach(([t,v])=>{
+        const k = range==='1D' ? Math.round(t/300)*300 : new Date(t*1000).toISOString().slice(0,10);
+        const cur = map.get(k) || { t, parts:{} }; cur.parts[h.id] = v*s.units; map.set(k, cur);
+      });
+    });
+    if (!anyLive) return [];
+    const keys = [...map.keys()].sort((a,b)=> (map.get(a).t - map.get(b).t));
+    const last = {}; const manual = stats.filter(x=>!x.s.live || x.s.units==null).reduce((a,x)=>a+x.s.value,0);
+    const liveIds = stats.filter(x=>x.s.live && x.s.units!=null).map(x=>x.h.id);
+    const out = [];
+    keys.forEach(k=>{ const row = map.get(k); Object.assign(last, row.parts); if (liveIds.every(id=>last[id]!=null)) out.push([row.t, liveIds.reduce((a,id)=>a+last[id],0) + manual]); });
+    return out;
+  }, [prices, data.holdings, data.txns, range]);
+
+  const open = openId ? stats.find(x=>x.h.id===openId) : null;
+  const updated = prices && prices.updatedAt;
+
+  return (
+    <React.Fragment>
+      {holdings.length===0 ? (
+        <div className="cart-empty">
+          <div className="cart-empty-title">Tu cartera, en directo</div>
+          <div className="cart-empty-sub">Dime qué fondos, ETFs o acciones tienes, cuánto has metido y cuánto vale ahora. A partir de ahí, la app sigue el precio sola y te enseña cuánto ganas o pierdes cada día.</div>
+          <button className="btn btn-primary" onClick={()=>setForm({})}>Añadir mi primera inversión</button>
+        </div>
+      ) : (
+        <>
+          <div className="cart-hero">
+            <div className="hero-label">Tu cartera vale</div>
+            <div className="hero-huge num"><AnimatedMoney value={total}/></div>
+            <div className="cart-gain">
+              <span className={gain>=0?'up':'down'}>{gain>=0?'+':''}{fmt2(gain)} ({pctStr(invested>0?gain/invested*100:0)})</span>
+              <span className="muted"> desde que empezaste</span>
+            </div>
+            {day!==0 && <div className="cart-day"><span className={day>=0?'up':'down'}>{day>=0?'+':''}{fmt2(day)} ({pctStr(dayPct)})</span><span className="muted"> hoy</span></div>}
+            <div className="cart-meta">Has metido {fmt2(invested)} · precios {updated ? sinceLabel(updated) : '…'}{pricesErr ? ' · sin conexión' : ''}</div>
+          </div>
+
+          {portfolioSeries.length>1 && (
+            <div className="card chart-card">
+              <div className="range-tabs">{RANGES.map(r=><button key={r.k} className={range===r.k?'on':''} onClick={()=>setRange(r.k)}>{r.label}</button>)}</div>
+              <LineChart points={portfolioSeries} baseline={range==='5A'||range==='1A' ? null : null}
+                fmtX={range==='1D' ? (t)=>new Date(t*1000).toLocaleTimeString('es-ES',{hour:'2-digit',minute:'2-digit'}) : undefined}/>
+              <div className="chart-note">Con las participaciones que tienes hoy.</div>
+            </div>
+          )}
+
+          <div className="section-label"><span>Tus inversiones</span><a onClick={()=>setForm({})}>Añadir</a></div>
+          <div className="cat-list">
+            {stats.map(({h,s,color})=>{
+              const spark = s.live ? seriesFor(s.live, '1M') : null;
+              const dpct = s.live && s.live.prevEUR ? (s.live.priceEUR/s.live.prevEUR-1)*100 : null;
+              return (
+                <div key={h.id} className="hold-row" onClick={()=>setOpenId(h.id)}>
+                  <div className="hold-dot" style={{background:color}}/>
+                  <div className="hold-mid">
+                    <div className="hold-name">{h.name}</div>
+                    <div className="hold-sub">{HOLDING_TYPES[h.type]||'Inversión'}{s.live ? <> · <span className={dpct>=0?'up':'down'}>{dpct!=null ? pctStr(dpct) : ''}</span> hoy</> : ' · valor manual'}</div>
+                  </div>
+                  {spark && <Sparkline points={spark} up={spark[spark.length-1][1]>=spark[0][1]}/>}
+                  <div className="hold-right">
+                    <div className="num hold-val">{fmt(s.value)}</div>
+                    <div className={`num hold-gain ${s.gain>=0?'up':'down'}`}>{s.gain>=0?'+':''}{fmt(s.gain)}</div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {stats.length>1 && total>0 && (
+            <>
+              <div className="section-label">Reparto</div>
+              <div className="card">
+                <DonutChart segments={stats.filter(x=>x.s.value>0).map(({h,s,color})=>({ label:h.name, value:s.value, color }))} centerValue={fmt(total)} centerLabel="total"/>
+              </div>
+            </>
+          )}
+        </>
+      )}
+
+      <a className="atlas-card" href={atlasUrl} target="_blank" rel="noopener">
+        <Icon name="globe"/>
+        <span><b>Estudio de mercado</b><small>Abre Atlas: carteras por perfil de riesgo y análisis de ETFs</small></span>
+      </a>
+      <div className="data-hint" style={{marginTop:10}}>Los precios vienen de Yahoo Finance y se actualizan cada 30 minutos en horario de mercado. Los fondos publican su valor una vez al día. No es asesoramiento financiero.</div>
+
+      {open && <HoldingDetail item={open} prices={prices} data={data} setData={setData} onClose={()=>setOpenId(null)} onEdit={()=>setForm(open.h)} onAporta={()=>onAporta(open.h, open.s)}/>}
+      {form && <HoldingForm holding={form} prices={prices} existing={holdings} onClose={()=>setForm(null)}
+        onSave={(h)=>{ setData(d=>{ const list = d.holdings||[]; return { ...d, holdings: h.id && list.some(x=>x.id===h.id) ? list.map(x=>x.id===h.id?{...x,...h}:x) : [...list, { ...h, id:uid(), created: todayISO() }] }; }); setForm(null); }}
+        onDelete={form.id ? ()=>{ setData(d=>({ ...d, holdings:(d.holdings||[]).filter(x=>x.id!==form.id) })); setForm(null); setOpenId(null); } : null}/>}
+    </React.Fragment>
+  );
+}
+
+function HoldingDetail({ item, prices, data, setData, onClose, onEdit, onAporta }){
+  const { h, s, color } = item;
+  const [range, setRange] = useState(s.live && (s.live.intradayEUR||[]).length>=2 ? '1D' : '1M');
+  const [ficha, setFicha] = useState({ busy:false, err:null });
+  const [keyOpen, setKeyOpen] = useState(false);
+  const [valOpen, setValOpen] = useState(false);
+  const live = s.live;
+  const series = seriesFor(live, range);
+  const rchg = series.length>1 ? (series[series.length-1][1]/series[0][1]-1)*100 : null;
+  const info = h.info;
+  const loadFicha = async () => {
+    setFicha({ busy:true, err:null });
+    try { const inf = await fetchFicha(h, live); setData(d=>({ ...d, holdings:(d.holdings||[]).map(x=>x.id===h.id?{...x, info:inf}:x) })); setFicha({ busy:false, err:null }); }
+    catch(e){ if (e.message==='NO_KEY') { setKeyOpen(true); setFicha({busy:false, err:null}); } else setFicha({ busy:false, err:e.message }); }
+  };
+  const fact = (l, v) => v ? <div className="fact"><span>{l}</span><b>{v}</b></div> : null;
+  return (
+    <Modal title={h.name} onClose={onClose}>
+      <div className="hd-top">
+        <span className="hd-chip" style={{'--c':color}}>{HOLDING_TYPES[h.type]||'Inversión'}</span>
+        {h.isin && <span className="hd-isin num">{h.isin}</span>}
+        {live && <span className="hd-isin">{live.symbol}{live.exchange ? ` · ${live.exchange}` : ''}</span>}
+      </div>
+
+      {live ? (
+        <>
+          <div className="hd-price">
+            <div className="num hd-price-v">{fmt2(live.priceEUR)}</div>
+            {rchg!=null && <div className={`hd-price-c ${rchg>=0?'up':'down'}`}>{pctStr(rchg)} <span className="muted">{range==='1D'?'hoy':`en ${RANGES.find(r=>r.k===range).label}`}</span></div>}
+          </div>
+          {live.native && <div className="data-hint" style={{textAlign:'left', margin:'0 0 6px'}}>Cotiza en {live.currency} ({live.price.toLocaleString('es-ES')} {live.currency}); te lo enseño pasado a euros.</div>}
+          <div className="range-tabs">{RANGES.map(r=><button key={r.k} className={range===r.k?'on':''} onClick={()=>setRange(r.k)}>{r.label}</button>)}</div>
+          <LineChart points={series} baseline={s.avgPrice && range!=='1D' ? s.avgPrice : null}
+            fmtX={range==='1D' ? (t)=>new Date(t*1000).toLocaleTimeString('es-ES',{hour:'2-digit',minute:'2-digit'}) : undefined}/>
+          {s.avgPrice && range!=='1D' && <div className="chart-note">La línea discontinua es tu precio medio de compra ({fmt2(s.avgPrice)}).</div>}
+          <div className="facts">
+            {fact('Máx. 52 semanas', live.high52!=null ? fmt2(toEUR(live.high52, live.currency, prices.fx)) : null)}
+            {fact('Mín. 52 semanas', live.low52!=null ? fmt2(toEUR(live.low52, live.currency, prices.fx)) : null)}
+            {fact('Último precio', live.time ? new Date(live.time*1000).toLocaleString('es-ES',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}) : null)}
+          </div>
+        </>
+      ) : (
+        <div className="notice soft" style={{marginTop:6}}>
+          <div className="notice-text">{h.isin ? 'Todavía no sigo el precio de este producto en directo. Pídeme que lo añada y se actualizará solo.' : 'Sin ISIN no puedo seguir su precio en directo. Actualiza su valor a mano cuando lo mires en tu broker.'}</div>
+        </div>
+      )}
+
+      <div className="data-section">Tu posición</div>
+      <div className="pos-grid">
+        <div><span>Vale ahora</span><b className="num">{fmt2(s.value)}</b></div>
+        <div><span>Has metido</span><b className="num">{fmt2(s.invested)}</b></div>
+        <div><span>Ganancia</span><b className={`num ${s.gain>=0?'up':'down'}`}>{s.gain>=0?'+':''}{fmt2(s.gain)}</b></div>
+        <div><span>Rentabilidad</span><b className={`num ${s.gain>=0?'up':'down'}`}>{pctStr(s.gainPct)}</b></div>
+        {s.units!=null && <div><span>Participaciones</span><b className="num">{s.units.toLocaleString('es-ES',{maximumFractionDigits:4})}</b></div>}
+        {live && s.units!=null && <div><span>Hoy</span><b className={`num ${s.dayChange>=0?'up':'down'}`}>{s.dayChange>=0?'+':''}{fmt2(s.dayChange)}</b></div>}
+      </div>
+      <div className="hd-actions">
+        <button className="btn btn-primary" onClick={onAporta}>Aportar</button>
+        <button className="btn btn-ghost" style={{marginTop:0}} onClick={()=>setValOpen(true)}>{live ? 'Ajustar al broker' : 'Actualizar valor'}</button>
+      </div>
+
+      <div className="data-section">Ficha</div>
+      {!info && !ficha.busy && <button className="btn btn-ghost" style={{marginTop:0}} onClick={loadFicha}><Icon name="sparkle"/>Buscar ficha completa</button>}
+      {ficha.busy && <div className="empty-hint">Buscando en internet comisiones, índice, posiciones…</div>}
+      {ficha.err && <div className="copy-ok" style={{color:'var(--danger)'}}>{ficha.err}</div>}
+      {info && (
+        <div className="ficha">
+          {info.descripcion && <p className="ficha-desc">{info.descripcion}</p>}
+          <div className="facts">
+            {fact('Gestora', info.gestora)}{fact('Índice', info.indice)}{fact('Comisión anual (TER)', info.ter)}{fact('Tamaño', info.tamano)}
+            {fact('Dividendos', info.dividendos)}{fact('Réplica', info.replicacion)}{fact('Domicilio', info.domicilio)}{fact('Lanzamiento', info.lanzamiento)}
+            {fact('Riesgo (1-7)', info.riesgo)}{fact('Nº de empresas', info.n_posiciones)}{fact('Rentab. 1 año', info.rent_1a)}{fact('Rentab. anual 5 años', info.rent_5a_anual)}
+          </div>
+          {[['Principales posiciones', info.top], ['Países', info.paises], ['Sectores', info.sectores]].map(([t, list])=> list && list.length ? (
+            <div key={t} className="ficha-block">
+              <div className="sum-block-title">{t}</div>
+              {list.slice(0,5).map((x,i)=>{ const w = parseFloat(String(x.peso||'').replace(',','.')); return (
+                <div key={i} className="wbar"><span className="wbar-name">{x.nombre}</span><span className="wbar-track"><span style={{width:`${isNaN(w)?0:Math.min(100,w)}%`, background:color}}/></span><span className="num wbar-v">{x.peso}</span></div>
+              ); })}
+            </div>
+          ) : null)}
+          {info.nota && <div className="ficha-note">{info.nota}</div>}
+          <div className="ficha-foot">
+            <span>Buscado {sinceLabel(info.at)} con Gemini. Comprueba los datos importantes en la web de la gestora.</span>
+            <button className="link-btn" style={{margin:'6px 0 0'}} onClick={loadFicha}>{ficha.busy ? 'Buscando…' : 'Actualizar ficha'}</button>
+          </div>
+          {info.sources && info.sources.length>0 && <div className="ficha-src">{info.sources.map((s2,i)=><a key={i} href={s2.uri} target="_blank" rel="noopener">{s2.title || 'Fuente'}</a>)}</div>}
+        </div>
+      )}
+
+      {s.contribs.length>0 && (
+        <>
+          <div className="data-section">Aportaciones</div>
+          {[...s.contribs].sort((a,b)=>b.date.localeCompare(a.date)).map(t=>(
+            <div key={t.id} className="sum-row"><span className="name">{dayLabel(t.date)}</span><span className="num">{fmt2(t.amount)}</span></div>
+          ))}
+        </>
+      )}
+
+      <button className="link-btn" onClick={onEdit}>Editar o eliminar esta inversión</button>
+      {keyOpen && <AIKeyModal onClose={()=>setKeyOpen(false)} onConnected={()=>{ setKeyOpen(false); loadFicha(); }}/>}
+      {valOpen && <ValueModal h={h} s={s} onClose={()=>setValOpen(false)} onSave={(v)=>{
+        setData(d=>({ ...d, holdings:(d.holdings||[]).map(x=>{
+          if (x.id!==h.id) return x;
+          if (live) { const contribUnits = s.contribs.reduce((a,t)=>a+Number(t.units||0),0); return { ...x, initUnits: v/live.priceEUR - contribUnits }; }
+          return { ...x, manualValue: v, manualDate: todayISO() };
+        }) })); setValOpen(false);
+      }}/>}
+    </Modal>
+  );
+}
+
+function ValueModal({ h, s, onClose, onSave }){
+  const [v, setV] = useState(String(Math.round(s.value*100)/100));
+  const n = Number(String(v).replace(',','.'));
+  return (
+    <Modal title={s.live ? 'Ajustar al valor del broker' : 'Actualizar valor'} onClose={onClose}>
+      <div className="ai-intro">{s.live ? 'Si el valor que ves en Trade Republic no coincide con el de la app, pon aquí el del broker y recalculo tus participaciones. A partir de ahí sigue el precio solo.' : 'Mira cuánto vale ahora en tu broker y ponlo aquí.'}</div>
+      <div className="field"><label>Valor actual en tu broker (€)</label><input type="number" inputMode="decimal" autoFocus value={v} onChange={e=>setV(e.target.value)}/></div>
+      <button className="btn btn-primary" disabled={!(n>0)} onClick={()=>onSave(n)}>Guardar</button>
+    </Modal>
+  );
+}
+
+function HoldingForm({ holding, prices, existing, onClose, onSave, onDelete }){
+  const isEdit = !!holding.id;
+  const tracked = prices && prices.items ? Object.values(prices.items) : [];
+  const usedIds = new Set(existing.filter(x=>x.id!==holding.id).map(x=>x.priceId).filter(Boolean));
+  const [priceId, setPriceId] = useState(holding.priceId || null);
+  const [custom, setCustom] = useState(isEdit && !holding.priceId);
+  const [name, setName] = useState(holding.name || '');
+  const [isin, setIsin] = useState(holding.isin || '');
+  const [type, setType] = useState(holding.type || 'etf');
+  const [inv, setInv] = useState(holding.initInvested!=null ? String(holding.initInvested) : '');
+  const [val, setVal] = useState('');
+  const pick = (p) => { setPriceId(p.id); setCustom(false); setName(p.name); setIsin(p.isin||''); setType(typeFromYahoo(p.type)); };
+  const sel = priceId && prices && prices.items[priceId];
+  const live = sel ? liveOf({ priceId }, prices) : null;
+  const invN = Number(String(inv).replace(',','.')), valN = Number(String(val).replace(',','.'));
+  const canSave = name.trim() && invN>=0 && (isEdit || valN>0);
+  const submit = () => {
+    const base = { ...(isEdit?{id:holding.id}:{}), name:name.trim(), isin:isin.trim().toUpperCase()||null, type, priceId: custom ? null : priceId, initInvested: invN||0 };
+    if (!isEdit || valN>0) {
+      if (live) { base.initUnits = valN / live.priceEUR; base.manualValue = null; }
+      else { base.initUnits = null; base.manualValue = valN; base.manualDate = todayISO(); }
+    }
+    onSave(base);
+  };
+  return (
+    <Modal title={isEdit ? 'Editar inversión' : 'Nueva inversión'} onClose={onClose}>
+      {!isEdit && (
+        <div className="field">
+          <label>¿Qué tienes?</label>
+          <div className="pick-list">
+            {tracked.map(p=>{
+              const l = liveOf({priceId:p.id}, prices);
+              return (
+                <button key={p.id} className={`pick ${priceId===p.id && !custom ? 'on' : ''}`} disabled={usedIds.has(p.id)} onClick={()=>pick(p)}>
+                  <span className="pick-name">{p.name}</span>
+                  <span className="pick-sub">{HOLDING_TYPES[typeFromYahoo(p.type)]} · {p.isin}{l ? ` · ${fmt2(l.priceEUR)}` : ''}{usedIds.has(p.id) ? ' · ya añadido' : ''}</span>
+                </button>
+              );
+            })}
+            <button className={`pick ${custom?'on':''}`} onClick={()=>{ setCustom(true); setPriceId(null); setName(''); setIsin(''); }}>
+              <span className="pick-name">Otro producto</span><span className="pick-sub">Lo apuntas a mano y, si me das el ISIN, lo añado al seguimiento de precios</span>
+            </button>
+          </div>
+        </div>
+      )}
+      {(custom || isEdit) && (
+        <>
+          <div className="field"><label>Nombre</label><input type="text" value={name} onChange={e=>setName(e.target.value)} placeholder="Ej. Vanguard Global Stock"/></div>
+          <div className="field-row">
+            <div className="field"><label>ISIN (opcional)</label><input type="text" value={isin} onChange={e=>setIsin(e.target.value)} placeholder="IE00…" autoCapitalize="characters"/></div>
+            <div className="field"><label>Tipo</label><select value={type} onChange={e=>setType(e.target.value)}>{Object.entries(HOLDING_TYPES).map(([k,v])=><option key={k} value={k}>{v}</option>)}</select></div>
+          </div>
+        </>
+      )}
+      {(priceId || custom || isEdit) && (
+        <>
+          <div className="field"><label>¿Cuánto has metido en total? (€)</label><input type="number" inputMode="decimal" value={inv} onChange={e=>setInv(e.target.value)} placeholder="Suma de todas tus aportaciones"/></div>
+          <div className="field"><label>{isEdit ? 'Valor actual (déjalo vacío para no cambiarlo)' : '¿Cuánto vale ahora? (€)'}</label><input type="number" inputMode="decimal" value={val} onChange={e=>setVal(e.target.value)} placeholder="Lo que pone en tu broker"/></div>
+          {live && valN>0 && <div className="goal-preview">Con el precio de ahora ({fmt2(live.priceEUR)}) son unas <b className="num">{(valN/live.priceEUR).toLocaleString('es-ES',{maximumFractionDigits:3})}</b> participaciones. A partir de aquí el valor se actualiza solo.</div>}
+          <button className="btn btn-primary" disabled={!canSave} onClick={submit}>{isEdit ? 'Guardar cambios' : 'Añadir a mi cartera'}</button>
+        </>
+      )}
+      {onDelete && <button className="btn btn-ghost" style={{color:'var(--danger)'}} onClick={onDelete}>Eliminar de la cartera</button>}
+      <div className="data-hint" style={{marginTop:12}}>Los importes se guardan solo en tu móvil.</div>
     </Modal>
   );
 }

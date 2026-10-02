@@ -1,9 +1,28 @@
 {
   "_nota": "Productos cuyo precio sigue la app. Solo nombres e ISIN: los importes viven en tu móvil, nunca aquí (este repositorio es público).",
   "items": [
-    { "id": "IE00BYX5NX33", "isin": "IE00BYX5NX33", "name": "Fidelity MSCI World Index Fund P-Acc EUR" },
-    { "id": "IE00B4L5Y983", "isin": "IE00B4L5Y983", "name": "iShares Core MSCI World UCITS ETF (Acc)" },
-    { "id": "IE00B3WJKG14", "isin": "IE00B3WJKG14", "name": "iShares S&P 500 Information Technology Sector UCITS ETF" },
-    { "id": "US8740391003", "isin": "US8740391003", "symbol": "TSM", "name": "Taiwan Semiconductor (TSMC) ADR" }
+    {
+      "id": "IE00BYX5NX33",
+      "isin": "IE00BYX5NX33",
+      "name": "Fidelity MSCI World Index Fund P-Acc EUR"
+    },
+    {
+      "id": "IE00B4L5Y983",
+      "isin": "IE00B4L5Y983",
+      "name": "iShares Core MSCI World UCITS ETF (Acc)",
+      "symbol": "EUNL.DE"
+    },
+    {
+      "id": "IE00B3WJKG14",
+      "isin": "IE00B3WJKG14",
+      "name": "iShares S&P 500 Information Technology Sector UCITS ETF",
+      "symbol": "QDVE.DE"
+    },
+    {
+      "id": "US8740391003",
+      "isin": "US8740391003",
+      "symbol": "TSM",
+      "name": "Taiwan Semiconductor (TSMC) ADR"
+    }
   ]
 }
