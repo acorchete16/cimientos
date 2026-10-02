@@ -237,6 +237,42 @@ async function shareBackup(data){
 }
 const daysSince = (iso) => iso ? Math.floor((Date.now() - new Date(iso).getTime())/86400000) : null;
 
+function monthStats(data, mk){
+  const kindOf = (id) => { const c = data.categories.find(c=>c.id===id); return c ? c.kind : 'gasto'; };
+  const txns = data.txns.filter(t=>monthOf(t.date)===mk);
+  const income = txns.filter(t=>t.type==='income').reduce((s,t)=>s+Number(t.amount),0);
+  const exp = txns.filter(t=>t.type==='expense');
+  const gasto = exp.filter(t=>kindOf(t.catId)==='gasto').reduce((s,t)=>s+Number(t.amount),0);
+  const apartado = exp.filter(t=>kindOf(t.catId)!=='gasto').reduce((s,t)=>s+Number(t.amount),0);
+  const byCat = {};
+  exp.forEach(t=>{ byCat[t.catId] = (byCat[t.catId]||0) + Number(t.amount); });
+  const plan = (data.plan && data.plan.categories) || {};
+  const gastoCats = data.categories.filter(c=>c.kind==='gasto');
+  const overs = gastoCats.map(c=>({ cat:c, spent:byCat[c.id]||0, plan:Number(plan[c.id]||0) }))
+    .filter(x=>x.plan>0 && x.spent>x.plan).sort((a,b)=>(b.spent-b.plan)-(a.spent-a.plan));
+  const unders = gastoCats.filter(c=>!c.fixed).map(c=>({ cat:c, spent:byCat[c.id]||0, plan:Number(plan[c.id]||0) }))
+    .filter(x=>x.plan>0 && x.spent<=x.plan).sort((a,b)=>(b.plan-b.spent)-(a.plan-a.spent));
+  const kept = income - gasto;              // lo que no te gastaste (apartado + sobrante)
+  const rate = income>0 ? kept/income : null;
+  return { mk, count:txns.length, income, gasto, apartado, kept, rate, overs, unders, byCat };
+}
+
+const monthIndex = (mk) => { const [y,m]=mk.split('-').map(Number); return y*12+(m-1); };
+function goalProgress(goal, txns){
+  const added = txns.filter(t=>t.goalId===goal.id).reduce((s,t)=>s+(t.type==='income'?-1:1)*Number(t.amount),0);
+  const saved = Number(goal.initial||0) + added;
+  const now = thisMonthKey();
+  const monthsLeft = monthIndex(goal.date) - monthIndex(now);
+  const remaining = Math.max(0, goal.target - saved);
+  const perMonth = monthsLeft>0 ? remaining/monthsLeft : remaining;
+  const start = goal.created || now;
+  const total = Math.max(1, monthIndex(goal.date) - monthIndex(start));
+  const elapsed = clamp(monthIndex(now) - monthIndex(start), 0, total);
+  const expected = Number(goal.initial||0) + (goal.target - Number(goal.initial||0)) * (elapsed/total);
+  const done = saved >= goal.target;
+  return { saved, remaining, perMonth, monthsLeft, expected, behind: Math.max(0, expected - saved), done, pct: goal.target>0 ? clamp(saved/goal.target,0,1) : 0 };
+}
+
 function catStatus(amt, planAmt, dayFrac){
   if (!planAmt) return { key:'none', color:'var(--faint)', text: amt>0 ? 'Sin presupuesto en el plan' : 'Sin gastos' };
   if (amt > planAmt) return { key:'over', color:'var(--danger)', text:`Te has pasado ${fmt(amt-planAmt)}` };
@@ -350,6 +386,35 @@ function App(){
   const realTxnCount = data.txns.length - demoCount;
   const backupAge = daysSince(data.meta && data.meta.lastBackup);
   const needsBackup = realTxnCount >= 5 && (backupAge===null || backupAge >= 7);
+  const [summaryMonth, setSummaryMonth] = useState(null);
+  const [goalEdit, setGoalEdit] = useState(null); // objetivo o {} para nuevo
+  const goals = data.goals || [];
+  const saveGoal = (g) => setData(d=>{
+    const list = d.goals || [];
+    return { ...d, goals: g.id && list.some(x=>x.id===g.id) ? list.map(x=>x.id===g.id ? { ...x, ...g } : x) : [...list, { ...g, id:uid(), created: thisMonthKey() }] };
+  });
+  const deleteGoal = (id) => setData(d=>({ ...d, goals:(d.goals||[]).filter(g=>g.id!==id) }));
+  const savingsCatId = (data.categories.find(c=>c.kind==='ahorro') || data.categories.find(c=>c.kind==='inversion') || {}).id || 'ahorro';
+  // Cierre automático: el primer día que abres la app en un mes nuevo, enseña el resumen del anterior
+  useEffect(()=>{
+    const prev = addMonths(thisMonthKey(), -1);
+    const seen = data.meta && data.meta.lastSummary;
+    const real = data.txns.filter(t=>!isDemoTxn(t) && monthOf(t.date)===prev);
+    if (seen !== prev && real.length >= 3) setSummaryMonth(prev);
+  }, []);
+  const closeSummary = () => {
+    const prev = addMonths(thisMonthKey(), -1);
+    if (summaryMonth===prev) setData(d=>({ ...d, meta:{ ...(d.meta||{}), lastSummary: prev } }));
+    setSummaryMonth(null);
+  };
+  // Acceso directo desde el icono (?add=expense / ?add=income)
+  useEffect(()=>{
+    try{
+      const q = new URLSearchParams(location.search);
+      const a = q.get('add');
+      if (a==='expense' || a==='income') { setAddOpen({ type:a }); history.replaceState(null, '', location.pathname); }
+    }catch(e){}
+  }, []);
   const removeDemo = () => setData(d=>({ ...d, txns: d.txns.filter(t=>!isDemoTxn(t)),
     plan: isDemoDerivedPlan(d.plan) ? JSON.parse(JSON.stringify(EXAMPLE_PLAN)) : d.plan }));
 
@@ -579,6 +644,7 @@ function App(){
                 <div className="hero-label">{restante>=0 ? 'Te sobró este mes' : 'Cerraste en negativo'}</div>
                 <div className="hero-huge num"><AnimatedMoney value={restante}/></div>
                 <div className="hero-sub">{fmt(incomeTotal)} de ingresos · {fmt(gastoTotal)} de gasto real{(ahorroTotal+inversionTotal)>0 && <> · después de apartar {fmt(ahorroTotal+inversionTotal)}</>}</div>
+                {monthTxns.length>0 && <button className="hero-link" onClick={()=>setSummaryMonth(month)}>Ver el cierre del mes</button>}
               </>)}
               {isFuture && (<>
                 <div className="hero-label">Presupuesto del día a día</div>
@@ -803,6 +869,39 @@ function App(){
 
       {tab==='historico' && (
         <React.Fragment>
+          <div className="section-label" style={{marginTop:4}}><span>Objetivos</span><a onClick={()=>setGoalEdit({})}>Nuevo</a></div>
+          {goals.length===0 ? (
+            <button className="goal-empty" onClick={()=>setGoalEdit({})}>
+              <div className="goal-empty-title">Ponle nombre a lo que ahorras</div>
+              <div className="goal-empty-sub">Un viaje, un fondo de emergencia, la entrada de un piso… Te digo cuánto apartar al mes para llegar.</div>
+              <span className="notice-btn">Crear objetivo</span>
+            </button>
+          ) : (
+            <div className="goal-list">
+              {goals.map(g=>{
+                const pr = goalProgress(g, data.txns);
+                return (
+                  <div key={g.id} className={`goal-card ${pr.done?'done':''}`}>
+                    <div className="goal-top" onClick={()=>setGoalEdit(g)}>
+                      <div>
+                        <div className="goal-name">{g.name}</div>
+                        <div className="goal-date">para {monthLabel(g.date)}</div>
+                      </div>
+                      <div className="goal-amt num">{fmt(pr.saved)}<span className="of"> / {fmt(g.target)}</span></div>
+                    </div>
+                    <div className="goal-bar"><div style={{width:`${pr.pct*100}%`}}/></div>
+                    <div className="goal-foot">
+                      <span className="goal-status" style={{color: pr.done ? 'var(--accent)' : pr.behind>1 ? 'var(--warn)' : 'var(--muted)'}}>
+                        {pr.done ? 'Conseguido' : pr.monthsLeft<=0 ? `Ha vencido el plazo · faltan ${fmt(pr.remaining)}` : pr.behind>1 ? `Vas ${fmt(pr.behind)} por detrás · aparta ${fmt(pr.perMonth)}/mes` : `Vas bien · aparta ${fmt(pr.perMonth)}/mes`}
+                      </span>
+                      {!pr.done && <button className="goal-add" onClick={()=>setAddOpen({ type:'expense', catId:savingsCatId, goalId:g.id, note:g.name, amount: Math.round(pr.perMonth) || undefined })}>Aportar</button>}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+          <div className="section-label">Todo lo acumulado</div>
           <div className="grid3" style={{gridTemplateColumns:'1fr 1fr', marginBottom:9}}>
             <div className="stat-mini"><div className="l">Ahorrado</div><div className="v num" style={{color:'var(--accent)'}}>{fmt(allTimeAhorro)}</div></div>
             <div className="stat-mini"><div className="l">Invertido</div><div className="v num" style={{color:'var(--invest)'}}>{fmt(allTimeInversion)}</div></div>
@@ -873,6 +972,9 @@ function App(){
           onDelete={()=>{ deleteCategory(editCatOpen.id); setEditCatOpen(null); }}
         />
       )}
+      {summaryMonth && <MonthSummaryModal stats={monthStats(data, summaryMonth)} prev={monthStats(data, addMonths(summaryMonth,-1))} catById={catById}
+        onClose={closeSummary} onOpenMonth={()=>{ setMonth(summaryMonth); setTab('mes'); closeSummary(); }}/>}
+      {goalEdit && <GoalModal goal={goalEdit} onClose={()=>setGoalEdit(null)} onSave={(g)=>{ saveGoal(g); setGoalEdit(null); }} onDelete={goalEdit.id ? ()=>{ deleteGoal(goalEdit.id); setGoalEdit(null); } : null}/>}
       {dataOpen && <DataModal data={data} setData={setData} onClose={()=>setDataOpen(false)}/>}
 
     </div>
@@ -914,9 +1016,10 @@ function AddTxnModal({ initial, categories, usage, onClose, onSave, onDelete }){
   const n = parseAmount(amount);
   const submit = () => {
     if(!n || n<=0 || !catId) return;
-    onSave({ ...(isEdit ? { id: initial.id } : {}), type, amount:n, catId, note:note.trim(), date });
+    onSave({ ...(isEdit ? { id: initial.id } : {}), ...(initial.goalId ? { goalId: initial.goalId } : {}), type, amount:n, catId, note:note.trim(), date });
   };
   const cat = options.find(o=>o.id===catId);
+  const goalHint = initial.goalId ? ' · para tu objetivo' : '';
   const dateLabel = date===todayISO() ? 'Hoy' : dayLabel(date);
   const [ip, dp] = amount.split(',');
   const intPart = ip ? new Intl.NumberFormat('es-ES').format(Number(ip)) : '0';
@@ -932,7 +1035,7 @@ function AddTxnModal({ initial, categories, usage, onClose, onSave, onDelete }){
         <div className={`v num ${amount===''?'empty':''}`} style={{color: amount!=='' && type==='income' ? 'var(--accent)' : undefined}}>
           {intPart}{amount.includes(',') && <>,{dp}</>}<span className="cur">€</span>
         </div>
-        <div className="hint">{cat ? (type==='expense' ? `en ${cat.name}` : `de ${cat.name}`) : ''}</div>
+        <div className="hint">{cat ? (type==='expense' ? `en ${cat.name}${goalHint}` : `de ${cat.name}`) : ''}</div>
       </div>
 
       <div className="qa-cats">
@@ -961,6 +1064,103 @@ function AddTxnModal({ initial, categories, usage, onClose, onSave, onDelete }){
         {isEdit ? 'Guardar cambios' : n ? `Guardar ${fmtExact(n)}` : (type==='expense' ? 'Guardar gasto' : 'Guardar ingreso')}
       </button>
       {isEdit && <button className="btn btn-ghost" style={{color:'var(--danger)'}} onClick={onDelete}>Eliminar movimiento</button>}
+    </Modal>
+  );
+}
+
+function MonthSummaryModal({ stats, prev, catById, onClose, onOpenMonth }){
+  const [y,m] = stats.mk.split('-').map(Number);
+  const name = MONTHS_ES[m-1];
+  const ratePct = stats.rate!=null ? Math.round(stats.rate*100) : null;
+  const diff = prev.count>0 ? stats.gasto - prev.gasto : null;
+  const verdict = ratePct==null ? 'Sin ingresos apuntados' : ratePct>=30 ? 'Mes muy bueno' : ratePct>=15 ? 'Buen mes' : ratePct>=0 ? 'Mes justo' : 'Mes en negativo';
+  return (
+    <Modal title={`Cierre de ${name}`} onClose={onClose}>
+      <div className="sum-hero">
+        <div className="sum-verdict">{verdict}</div>
+        <div className="sum-big num" style={{color: stats.kept<0 ? 'var(--danger)' : 'var(--ink)'}}>{fmt(stats.kept)}</div>
+        <div className="sum-sub">
+          {stats.kept>=0 ? 'no te los gastaste' : 'gastaste más de lo que entró'}
+          {ratePct!=null && stats.kept>=0 && <> · el <b>{ratePct}%</b> de tus ingresos</>}
+        </div>
+        {ratePct!=null && <div className="sum-rate"><div style={{width:`${clamp(ratePct,0,100)}%`}}/></div>}
+      </div>
+
+      <div className="sum-grid">
+        <div><div className="l">Ingresos</div><div className="v num">{fmt(stats.income)}</div></div>
+        <div><div className="l">Gasto real</div><div className="v num">{fmt(stats.gasto)}</div></div>
+        <div><div className="l">Apartado</div><div className="v num" style={{color:'var(--accent)'}}>{fmt(stats.apartado)}</div></div>
+      </div>
+
+      {diff!=null && (
+        <div className="sum-line">
+          {Math.abs(diff)<5 ? 'Gastaste prácticamente lo mismo que el mes anterior.'
+            : diff<0 ? <>Gastaste <b style={{color:'var(--accent)'}}>{fmt(-diff)} menos</b> que el mes anterior.</>
+            : <>Gastaste <b style={{color:'var(--warn)'}}>{fmt(diff)} más</b> que el mes anterior.</>}
+        </div>
+      )}
+
+      {stats.overs.length>0 && (
+        <div className="sum-block">
+          <div className="sum-block-title">Donde te pasaste</div>
+          {stats.overs.slice(0,3).map(x=>(
+            <div key={x.cat.id} className="sum-row">
+              <span className="sw" style={{background:x.cat.color}}/><span className="name">{x.cat.name}</span>
+              <span className="num" style={{color:'var(--danger)'}}>+{fmt(x.spent-x.plan)}</span>
+            </div>
+          ))}
+        </div>
+      )}
+      {stats.unders.length>0 && (
+        <div className="sum-block">
+          <div className="sum-block-title">Donde te sobró</div>
+          {stats.unders.slice(0,3).map(x=>(
+            <div key={x.cat.id} className="sum-row">
+              <span className="sw" style={{background:x.cat.color}}/><span className="name">{x.cat.name}</span>
+              <span className="num" style={{color:'var(--accent)'}}>{fmt(x.plan-x.spent)}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <button className="btn btn-primary" onClick={onClose}>Empezar el mes</button>
+      <button className="btn btn-ghost" onClick={onOpenMonth}>Ver {name} en detalle</button>
+    </Modal>
+  );
+}
+
+function GoalModal({ goal, onClose, onSave, onDelete }){
+  const isEdit = !!goal.id;
+  const defDate = addMonths(thisMonthKey(), 12);
+  const [name, setName] = useState(goal.name || '');
+  const [target, setTarget] = useState(goal.target!=null ? String(goal.target) : '');
+  const [date, setDate] = useState(goal.date || defDate);
+  const [initial, setInitial] = useState(goal.initial ? String(goal.initial) : '');
+  const t = Number(target)||0, i = Number(initial)||0;
+  const months = monthIndex(date) - monthIndex(thisMonthKey());
+  const per = months>0 ? Math.max(0,t-i)/months : null;
+  const submit = () => {
+    if (!name.trim() || t<=0 || !/^\d{4}-\d{2}$/.test(date)) return;
+    onSave({ ...(isEdit?{ id:goal.id }:{}), name:name.trim(), target:t, date, initial:i });
+  };
+  return (
+    <Modal title={isEdit ? 'Editar objetivo' : 'Nuevo objetivo'} onClose={onClose}>
+      <div className="field"><label>¿Para qué ahorras?</label><input autoFocus type="text" value={name} onChange={e=>setName(e.target.value)} placeholder="Ej. Viaje verano 2027"/></div>
+      <div className="field-row">
+        <div className="field"><label>Cuánto necesitas</label><input type="number" inputMode="decimal" value={target} onChange={e=>setTarget(e.target.value)} placeholder="1500"/></div>
+        <div className="field"><label>Para cuándo</label><input type="month" value={date} min={addMonths(thisMonthKey(),1)} onChange={e=>e.target.value && setDate(e.target.value)}/></div>
+      </div>
+      <div className="field"><label>¿Ya tienes algo apartado para esto?</label><input type="number" inputMode="decimal" value={initial} onChange={e=>setInitial(e.target.value)} placeholder="0"/></div>
+      {t>0 && (
+        <div className="goal-preview">
+          {per!=null
+            ? <>Tienes que apartar <b className="num">{fmt(per)}</b> al mes durante {months} {months===1?'mes':'meses'}.</>
+            : <>Elige una fecha a partir del mes que viene.</>}
+        </div>
+      )}
+      <button className="btn btn-primary" disabled={!name.trim() || t<=0} onClick={submit}>{isEdit ? 'Guardar cambios' : 'Crear objetivo'}</button>
+      {onDelete && <button className="btn btn-ghost" style={{color:'var(--danger)'}} onClick={onDelete}>Eliminar objetivo</button>}
+      {isEdit && <div className="data-hint">Las aportaciones que ya hiciste se quedan como ahorro aunque elimines el objetivo.</div>}
     </Modal>
   );
 }

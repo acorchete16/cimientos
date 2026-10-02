@@ -313,6 +313,50 @@
   .link-btn{ display:block; margin:16px auto 0; border:none; background:none; color:var(--muted); font-size:13px; font-weight:600; text-decoration:underline; text-underline-offset:3px; cursor:pointer; }
   .data-textarea{ width:100%; min-height:90px; margin-top:8px; padding:10px; border-radius:12px; border:1px solid var(--line); background:var(--bg); color:var(--ink); font-size:12px; font-family:ui-monospace,monospace; }
   .btn svg{ width:17px; height:17px; }
+  .hero-link{ margin-top:12px; border:1px solid rgba(243,235,221,0.18); background:rgba(243,235,221,0.06); color:var(--ink); border-radius:12px; padding:8px 12px; font-size:13px; font-weight:600; cursor:pointer; }
+  .goal-list{ display:flex; flex-direction:column; gap:10px; }
+  .goal-card{ background:var(--surface); border:1px solid var(--line); border-radius:20px; padding:14px; box-shadow:var(--shadow); }
+  .goal-card.done{ border-color:rgba(143,214,106,0.35); background:linear-gradient(160deg, rgba(143,214,106,0.10), var(--surface) 70%); }
+  .goal-top{ display:flex; justify-content:space-between; align-items:flex-start; gap:10px; cursor:pointer; }
+  .goal-name{ font-family:var(--display); font-size:18px; font-weight:600; line-height:1.2; }
+  .goal-date{ font-size:12.5px; color:var(--faint); margin-top:2px; }
+  .goal-amt{ font-weight:750; font-size:15px; flex-shrink:0; text-align:right; }
+  .goal-amt .of{ color:var(--faint); font-weight:500; }
+  .goal-bar{ height:10px; border-radius:6px; background:var(--surface-3); margin:12px 0 10px; overflow:hidden; }
+  .goal-bar > div{ height:100%; border-radius:6px; background:linear-gradient(90deg, #B7EC8E, #8FD66A); box-shadow:0 0 12px rgba(143,214,106,0.45); }
+  .goal-foot{ display:flex; justify-content:space-between; align-items:center; gap:10px; }
+  .goal-status{ font-size:12.5px; font-weight:600; line-height:1.35; }
+  .goal-add{ flex-shrink:0; border:none; border-radius:12px; padding:8px 14px; background:var(--accent-soft); color:var(--accent); font-weight:700; font-size:13px; cursor:pointer; border:1px solid rgba(143,214,106,0.3); }
+  .goal-empty{ display:block; width:100%; text-align:left; cursor:pointer; padding:16px; border-radius:20px; border:1px dashed rgba(255,122,26,0.4); background:linear-gradient(135deg, rgba(255,122,26,0.10), transparent); color:var(--ink); font-family:inherit; }
+  .goal-empty-title{ font-family:var(--display); font-size:18px; font-weight:600; }
+  .goal-empty-sub{ font-size:13px; color:var(--muted); margin:4px 0 12px; line-height:1.4; }
+  .goal-empty .notice-btn{ display:inline-block; }
+  .goal-preview{ padding:12px 14px; border-radius:14px; background:var(--accent-soft); border:1px solid rgba(143,214,106,0.25); font-size:14px; margin-bottom:14px; line-height:1.4; }
+  .goal-preview b{ color:var(--accent); }
+  .field-row{ display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+  .field input[type=month]{ min-height:44px; }
+
+  .sum-hero{ text-align:center; padding:6px 0 16px; }
+  .sum-verdict{ font-size:13.5px; font-weight:700; color:var(--amber); }
+  .sum-big{ font-family:var(--display); font-size:52px; font-weight:650; line-height:1.05; margin:6px 0 4px; text-shadow:0 0 28px rgba(255,140,50,0.22); }
+  .sum-sub{ font-size:14px; color:var(--muted); }
+  .sum-sub b{ color:var(--ink); }
+  .sum-rate{ height:8px; border-radius:5px; background:var(--surface-3); margin:14px 20px 0; overflow:hidden; }
+  .sum-rate > div{ height:100%; border-radius:5px; background:linear-gradient(90deg, #B7EC8E, #8FD66A); }
+  .sum-grid{ display:grid; grid-template-columns:repeat(3,1fr); background:var(--bg); border:1px solid var(--line); border-radius:16px; overflow:hidden; margin-bottom:12px; }
+  .sum-grid > div{ padding:10px 12px; }
+  .sum-grid > div + div{ border-left:1px solid var(--line); }
+  .sum-grid .l{ font-size:12px; color:var(--muted); font-weight:600; }
+  .sum-grid .v{ font-family:var(--display); font-size:18px; font-weight:650; }
+  .sum-line{ font-size:14px; color:var(--muted); padding:4px 2px 10px; line-height:1.4; }
+  .sum-line b{ font-weight:700; }
+  .sum-block{ margin-bottom:12px; }
+  .sum-block-title{ font-size:13px; font-weight:700; color:var(--muted); margin-bottom:6px; }
+  .sum-row{ display:flex; align-items:center; gap:9px; padding:7px 0; border-bottom:1px solid var(--line-soft); font-size:14px; }
+  .sum-row:last-child{ border-bottom:none; }
+  .sum-row .sw{ width:9px; height:9px; border-radius:3px; flex-shrink:0; }
+  .sum-row .name{ flex:1; font-weight:600; }
+  .sum-row .num{ font-weight:700; }
   .copy-ok{ font-size:12.5px; text-align:center; margin-top:8px; font-weight:600; }
   .empty-hint{ text-align:center; color:var(--faint); font-size:13.5px; padding:18px 0; }
 </style>
