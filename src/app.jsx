@@ -275,6 +275,51 @@ function goalProgress(goal, txns){
   return { saved, remaining, perMonth, monthsLeft, expected, behind: Math.max(0, expected - saved), done, pct: goal.target>0 ? clamp(saved/goal.target,0,1) : 0 };
 }
 
+// ---------- Detalles de Halloween (discretos) ----------
+const BAT_PATH = "M32 9c-1.6 0-2.6 1.6-2.8 3.6C26 9.8 21 8 15 9.2c2.6 1.8 3.8 4.4 3.6 7.4-4-1.8-8.6-1.6-12.6.4 5.6 1.6 9.6 5.2 11.6 9.4 3-2.8 7.6-3.8 11.6-2.8.8-1.8 1.6-3 2.8-3s2 1.2 2.8 3c4-1 8.6 0 11.6 2.8 2-4.2 6-7.8 11.6-9.4-4-2-8.6-2.2-12.6-.4-.2-3 1-5.6 3.6-7.4C43 8 38 9.8 34.8 12.6 34.6 10.6 33.6 9 32 9z";
+function Bats(){
+  // Dos murciélagos cruzan una vez al abrir la app (una vez por sesión)
+  const [show, setShow] = useState(()=>{ try{ return !sessionStorage.getItem('bats'); }catch(e){ return false; } });
+  useEffect(()=>{ if(!show) return; try{ sessionStorage.setItem('bats','1'); }catch(e){} const t=setTimeout(()=>setShow(false), 7000); return ()=>clearTimeout(t); }, []);
+  if (!show) return null;
+  return (
+    <div className="bats" aria-hidden="true">
+      <svg className="bat b1" viewBox="0 0 64 32"><g className="flap"><path d={BAT_PATH}/></g></svg>
+      <svg className="bat b2" viewBox="0 0 64 32"><g className="flap"><path d={BAT_PATH}/></g></svg>
+    </div>
+  );
+}
+function Spider(){
+  const [up, setUp] = useState(false);
+  useEffect(()=>{ if(!up) return; const t=setTimeout(()=>setUp(false), 6000); return ()=>clearTimeout(t); }, [up]);
+  return (
+    <div className={`spider ${up?'up':''}`} onClick={(e)=>{ e.stopPropagation(); setUp(true); }} aria-hidden="true">
+      <div className="spider-thread"/>
+      <svg className="spider-body" viewBox="0 0 24 20">
+        <g stroke="#F3EBDD" strokeWidth="1" strokeLinecap="round" fill="none" opacity="0.75">
+          <path d="M9 9 3 4M9 10 2 9M9 11 3 15M10 12 5 18M15 9 21 4M15 10 22 9M15 11 21 15M14 12 19 18"/>
+        </g>
+        <ellipse cx="12" cy="11" rx="3.6" ry="4.2" fill="#0E0914" stroke="#F3EBDD" strokeOpacity="0.55" strokeWidth="0.8"/>
+        <circle cx="12" cy="6.6" r="2.2" fill="#0E0914" stroke="#F3EBDD" strokeOpacity="0.55" strokeWidth="0.8"/>
+        <circle cx="11.2" cy="6.4" r="0.45" fill="#FF7A1A"/><circle cx="12.8" cy="6.4" r="0.45" fill="#FF7A1A"/>
+      </svg>
+    </div>
+  );
+}
+function MoonMark(){
+  return (
+    <svg className="moon-mark" viewBox="0 0 40 40" aria-hidden="true">
+      <defs><radialGradient id="mg" cx="0.5" cy="0.5" r="0.5"><stop offset="0.55" stopColor="#FFD9A3" stopOpacity="0.35"/><stop offset="1" stopColor="#FF7A1A" stopOpacity="0"/></radialGradient></defs>
+      <circle cx="20" cy="20" r="19" fill="url(#mg)"/>
+      <path d="M24.5 10.5a10 10 0 1 0 5 15.4 8 8 0 1 1-5-15.4z" fill="#FFE6C2"/>
+      <circle className="star s1" cx="6" cy="8" r="0.9" fill="#FFE6C2"/>
+      <circle className="star s2" cx="34" cy="34" r="0.7" fill="#FFE6C2"/>
+      <circle className="star s3" cx="9" cy="31" r="0.6" fill="#FFE6C2"/>
+    </svg>
+  );
+}
+const isHalloweenNight = () => todayISO().slice(5)==='10-31';
+
 function catStatus(amt, planAmt, dayFrac){
   if (!planAmt) return { key:'none', color:'var(--faint)', text: amt>0 ? 'Sin presupuesto en el plan' : 'Sin gastos' };
   if (amt > planAmt) return { key:'over', color:'var(--danger)', text:`Te has pasado ${fmt(amt-planAmt)}` };
@@ -650,9 +695,11 @@ function App(){
           </div>
 
           <div className={`hero ${heroOver ? 'over' : ''}`}>
+            <MoonMark/>
+            <Spider/>
             <div className="hero-inner">
               {isCurrent && !heroOver && (<>
-                <div className="hero-label">Hoy puedes gastar</div>
+                <div className="hero-label">{isHalloweenNight() ? 'Noche de Halloween · hoy puedes gastar' : 'Hoy puedes gastar'}</div>
                 <div className="hero-huge num"><AnimatedMoney value={Math.max(0, canSpendToday)}/></div>
                 <div className="hero-sub">
                   {canSpendToday < 0
@@ -826,7 +873,7 @@ function App(){
 
           <div className="section-label">Movimientos</div>
           <div className="card txn-card">
-            {recentTxns.length===0 ? <div className="empty-hint">Todavía no hay movimientos este mes. Toca el botón + para añadir uno.</div> : (
+            {recentTxns.length===0 ? <div className="empty-hint">Silencio de cementerio: aún no hay movimientos este mes. Toca el botón naranja para apuntar el primero.</div> : (
               txnGroups.map(([day, list])=>(
                 <React.Fragment key={day}>
                   <div className="day-head"><span>{dayLabel(day)}</span><span className="num">{(()=>{ const net=list.reduce((s,t)=>s+(t.type==='income'?1:-1)*Number(t.amount),0); return (net>0?'+':'')+fmt(net); })()}</span></div>
@@ -971,6 +1018,7 @@ function App(){
         </React.Fragment>
       )}
 
+      <Bats/>
       <nav className="bottom-nav">
         <div className="bottom-nav-inner">
           <button className={`nav-btn ${tab==='mes'?'active':''}`} onClick={()=>setTab('mes')}><Icon name="navMes"/>Mes</button>
