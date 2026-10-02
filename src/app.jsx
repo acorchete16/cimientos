@@ -36,6 +36,7 @@ const Icon = ({ name, ...p }) => {
     backspace: <><path d="M9 5h11v14H9l-6-7z"/><path d="M13 9.5l5 5M18 9.5l-5 5"/></>,
     navMes: <><rect x="3.5" y="4" width="17" height="16" rx="2"/><path d="M3.5 9h17"/><path d="M8 13h3M8 16h6"/></>,
     navPlan: <><path d="M4 20V9l8-5 8 5v11"/><path d="M4 20h16"/><path d="M9 20v-6h6v6"/></>,
+    globe: <><circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17M12 3.5c2.4 2.6 3.6 5.4 3.6 8.5s-1.2 5.9-3.6 8.5M12 3.5C9.6 6.1 8.4 8.9 8.4 12s1.2 5.9 3.6 8.5"/></>,
     navAcum: <><path d="M4 19h16"/><path d="M6 16v-4M10 16V8M14 16v-6M18 16V5"/></>,
     backup: <><ellipse cx="12" cy="6" rx="7" ry="2.6"/><path d="M5 6v6c0 1.4 3.1 2.6 7 2.6s7-1.2 7-2.6V6"/><path d="M5 12v6c0 1.4 3.1 2.6 7 2.6s7-1.2 7-2.6v-6"/></>,
     camera: <><path d="M4 8.5A1.5 1.5 0 0 1 5.5 7h2l1.5-2h6l1.5 2h2A1.5 1.5 0 0 1 20 8.5v9a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 17.5z"/><circle cx="12" cy="12.5" r="3.4"/></>,
@@ -591,6 +592,9 @@ function App(){
     return Object.entries(map).sort((a,b)=>b[1]-a[1]).map(([catId,v])=>({ catId, value:v }));
   }, [data.txns, data.categories]);
 
+  // Estudio de mercado → Atlas, con tu aportación mensual a inversión
+  const atlasMonthly = Math.round(Number((data.plan && data.plan.categories && data.plan.categories[(data.categories.find(c=>c.kind==='inversion')||{}).id]) || 0) || inversionTotal || 0);
+  const atlasUrl = `https://acorchete16.github.io/ProjectATLAS/?from=cimientos${atlasMonthly>0 ? `&monthly=${atlasMonthly}` : ''}`;
   const usage = useMemo(()=>{
     const d = new Date(); d.setDate(d.getDate()-90);
     const cutoff = d.toISOString().slice(0,10);
@@ -1025,6 +1029,7 @@ function App(){
           <button className={`nav-btn ${tab==='plan'?'active':''}`} onClick={()=>setTab('plan')}><Icon name="navPlan"/>Plan</button>
           <button className="fab" aria-label="Apuntar movimiento" onClick={()=>setAddOpen({ type:'expense' })}><Icon name="plus"/></button>
           <button className={`nav-btn ${tab==='historico'?'active':''}`} onClick={()=>setTab('historico')}><Icon name="navAcum"/>Acumulado</button>
+          <a className="nav-btn" href={atlasUrl} target="_blank" rel="noopener"><Icon name="globe"/>Mercado</a>
         </div>
       </nav>
 
