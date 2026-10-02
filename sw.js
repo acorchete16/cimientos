@@ -1,5 +1,5 @@
-const CACHE = 'cimientos-v2';
-const ASSETS = ['./', 'index.html', 'app.js', 'react.js', 'react-dom.js', 'manifest.json', 'icon-192.png', 'icon-512.png', 'apple-touch-icon.png'];
+const CACHE = 'cimientos-v3';
+const ASSETS = ['./', 'index.html', 'app.js', 'react.js', 'react-dom.js', 'manifest.json', 'icon-192.png', 'icon-512.png', 'apple-touch-icon.png', 'archivo.woff2'];
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS)).then(() => self.skipWaiting()));
 });

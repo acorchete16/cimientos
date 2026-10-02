@@ -32,6 +32,12 @@ const Icon = ({ name, ...p }) => {
     arrowDown: <path d="M12 5v14M6 13l6 6 6-6"/>,
     arrowUp: <path d="M12 19V5M6 11l6-6 6 6"/>,
     piggy: <><path d="M4 12a6 6 0 0 1 6-6h4a6 6 0 0 1 6 4h1l-1.2 2.4A6 6 0 0 1 14 18h-1v3H9v-3H8l-2-2H4z"/><circle cx="15" cy="11" r=".6" fill="currentColor" stroke="none"/></>,
+    calendar: <><rect x="3.5" y="5" width="17" height="15" rx="2"/><path d="M3.5 10h17M8 3v4M16 3v4"/></>,
+    backspace: <><path d="M9 5h11v14H9l-6-7z"/><path d="M13 9.5l5 5M18 9.5l-5 5"/></>,
+    navMes: <><rect x="3.5" y="4" width="17" height="16" rx="2"/><path d="M3.5 9h17"/><path d="M8 13h3M8 16h6"/></>,
+    navPlan: <><path d="M4 20V9l8-5 8 5v11"/><path d="M4 20h16"/><path d="M9 20v-6h6v6"/></>,
+    navAcum: <><path d="M4 19h16"/><path d="M6 16v-4M10 16V8M14 16v-6M18 16V5"/></>,
+    backup: <><ellipse cx="12" cy="6" rx="7" ry="2.6"/><path d="M5 6v6c0 1.4 3.1 2.6 7 2.6s7-1.2 7-2.6V6"/><path d="M5 12v6c0 1.4 3.1 2.6 7 2.6s7-1.2 7-2.6v-6"/></>,
     check: <path d="M5 12.5l4.5 4.5L19 7.5"/>,
     edit: <><path d="M4 20h4L18.5 9.5a2.1 2.1 0 0 0-3-3L4.5 17z"/><path d="M13.5 6.5l4 4"/></>,
   };
@@ -57,7 +63,7 @@ const FIXED_IDS = ["piso","agualuz","subs","gym"];
 const KIND_META = {
   gasto:    { label:"Gasto",    color:"var(--danger)" },
   ahorro:   { label:"Ahorro",   color:"var(--accent)" },
-  inversion:{ label:"Inversión",color:"var(--warn)" },
+  inversion:{ label:"Inversión",color:"var(--invest)" },
 };
 function inferKind(cat){
   const n = (cat.name||'').toLowerCase();
@@ -82,6 +88,7 @@ const monthLabel = (mk) => { const [y,m]=mk.split('-').map(Number); return `${MO
 const monthLabelShort = (mk) => { const [y,m]=mk.split('-').map(Number); return `${MONTHS_ES[m-1].slice(0,3)} ${y}`; };
 const uid = () => Math.random().toString(36).slice(2,9);
 const clamp=(n,a,b)=>Math.max(a,Math.min(b,n));
+const fmtExact = (n) => new Intl.NumberFormat('es-ES',{style:'currency',currency:'EUR',minimumFractionDigits: Number.isInteger(Number(n))?0:2, maximumFractionDigits:2}).format(n||0);
 const fmt = (n) => new Intl.NumberFormat('es-ES',{style:'currency',currency:'EUR',maximumFractionDigits:0}).format(n||0);
 
 function seed(){
@@ -173,8 +180,8 @@ function DonutChart({ segments, size=130, thickness=18, centerLabel, centerValue
           return <circle key={i} cx={cx} cy={cy} r={r} fill="none" stroke={s.color} strokeWidth={thickness}
             strokeDasharray={`${dash} ${gap}`} strokeDashoffset={offset} transform={`rotate(-90 ${cx} ${cy})`}/>;
         })}
-        <text x={cx} y={cy-3} textAnchor="middle" style={{fontSize:14, fill:'var(--ink)', fontFamily:"'Fraunces',serif", fontWeight:600}}>{centerValue}</text>
-        <text x={cx} y={cy+13} textAnchor="middle" style={{fontSize:9, fill:'var(--muted)', fontFamily:"'IBM Plex Sans',sans-serif"}}>{centerLabel}</text>
+        <text x={cx} y={cy-3} textAnchor="middle" style={{fontSize:14, fill:'var(--ink)', fontFamily:"'Archivo',sans-serif", fontWeight:800}}>{centerValue}</text>
+        <text x={cx} y={cy+13} textAnchor="middle" style={{fontSize:9, fill:'var(--muted)', fontFamily:"'Archivo',sans-serif"}}>{centerLabel}</text>
       </svg>
       <div className="donut-legend">
         {segments.map((s,i)=>(
@@ -226,6 +233,37 @@ function AnimatedMoney({ value }){
     return () => cancelAnimationFrame(raf);
   }, [value]);
   return <>{fmt(shown)}</>;
+}
+
+function Cota({ spent, budget, dayFrac, over }){
+  // Línea de cota estilo plano: 0 → presupuesto, relleno = gastado, marca = dónde deberías ir hoy
+  const W = 320, x0 = 8, x1 = W-8, yL = 30;
+  const X = (f) => x0 + clamp(f,0,1)*(x1-x0);
+  const fs = budget>0 ? spent/budget : 0;
+  const col = over ? 'var(--danger)' : (dayFrac!=null && fs > dayFrac*1.1 ? 'var(--amber)' : 'var(--accent)');
+  const ticks = [0.25,0.5,0.75];
+  return (
+    <svg className="cota" viewBox={`0 0 ${W} 62`} preserveAspectRatio="none" aria-hidden="true">
+      <line x1={x0} y1={yL-12} x2={x0} y2={yL+12} stroke="#5A7590" strokeWidth="1"/>
+      <line x1={x1} y1={yL-12} x2={x1} y2={yL+12} stroke="#5A7590" strokeWidth="1"/>
+      <line x1={x0} y1={yL} x2={x1} y2={yL} stroke="#3A5470" strokeWidth="1"/>
+      <path d={`M${x0} ${yL} l7 -3.5 v7 z`} fill="#5A7590"/>
+      <path d={`M${x1} ${yL} l-7 -3.5 v7 z`} fill="#5A7590"/>
+      {ticks.map(t=> <line key={t} x1={X(t)} y1={yL-4} x2={X(t)} y2={yL+4} stroke="#3A5470"/>)}
+      <rect x={x0} y={yL-3} width={Math.max(0, X(fs)-x0)} height="6" rx="1.5" fill={col}/>
+      {fs>1 && <rect x={x1-2} y={yL-6} width="4" height="12" fill="var(--danger)"/>}
+      {dayFrac!=null && (
+        <g>
+          <line x1={X(dayFrac)} y1={yL-14} x2={X(dayFrac)} y2={yL+8} stroke="var(--ink)" strokeWidth="1.2" strokeDasharray="2 2"/>
+          <path d={`M${X(dayFrac)-4} ${yL-19} h8 l-4 5 z`} fill="var(--ink)"/>
+          <text x={clamp(X(dayFrac), x0+14, x1-14)} y={yL-23} textAnchor="middle" className="strong">hoy</text>
+        </g>
+      )}
+      <text x={x0} y={yL+24}>0 €</text>
+      <text x={x1} y={yL+24} textAnchor="end" className="strong">{fmt(budget)}</text>
+      {fs>0.12 && fs<0.85 && <text x={X(fs)} y={yL+24} textAnchor="middle" style={{fill:col}}>{fmt(spent)}</text>}
+    </svg>
+  );
 }
 
 function PaceChart({ daily, daysInMonth, dayNow, budget }){
@@ -322,8 +360,7 @@ function App(){
     return () => { if (writeTimer.current) clearTimeout(writeTimer.current); };
   }, [data]);
   useEffect(()=>{
-    document.documentElement.setAttribute('data-theme', theme);
-    if(theme==='system') document.documentElement.removeAttribute('data-theme');
+    document.documentElement.setAttribute('data-theme', 'dark');
     try{ localStorage.setItem(THEME_KEY, theme); }catch(e){}
   }, [theme]);
 
@@ -381,6 +418,13 @@ function App(){
     return Object.entries(map).sort((a,b)=>b[1]-a[1]).map(([catId,v])=>({ catId, value:v }));
   }, [data.txns, data.categories]);
 
+  const usage = useMemo(()=>{
+    const d = new Date(); d.setDate(d.getDate()-90);
+    const cutoff = d.toISOString().slice(0,10);
+    const m = {};
+    data.txns.forEach(t=>{ if (t.date>=cutoff) m[t.catId] = (m[t.catId]||0) + 1; });
+    return m;
+  }, [data.txns]);
   const recentTxns = [...monthTxns].sort((a,b)=> b.date.localeCompare(a.date));
   const txnGroups = useMemo(()=>{
     const m = new Map();
@@ -434,7 +478,12 @@ function App(){
     <div className="wrap">
       <div className="topline">
         <div className="brand">
-          <div className="brand-mark"><Icon name="shield"/></div>
+          <div className="brand-mark">
+            <svg viewBox="0 0 30 30" fill="none">
+              <rect x="1" y="1" width="28" height="28" rx="8" fill="#121E2B" stroke="#2A4058"/>
+              <path d="M7 21h16M9 21v-5h12v5M11 16v-4h8v4M13 12V9h4v3" stroke="#F4B740" strokeWidth="1.7" strokeLinejoin="round"/>
+            </svg>
+          </div>
           <div>
             <div className="brand-name">Cimientos</div>
             <div className="sync-badge">
@@ -446,16 +495,9 @@ function App(){
             </div>
           </div>
         </div>
-        <button className="theme-btn" onClick={()=>setTheme(t=> t==='dark' ? 'light' : t==='light' ? 'system' : 'dark')}>
-          <Icon name={theme==='dark' ? 'moon' : 'sun'} style={{opacity:theme==='system'?0.5:1}}/>
-        </button>
+        <button className="icon-btn" aria-label="Copia de seguridad" onClick={()=>setDataOpen(true)}><Icon name="backup"/></button>
       </div>
 
-      <div className="tabs">
-        <button className={tab==='mes'?'active':''} onClick={()=>setTab('mes')}>Mes actual</button>
-        <button className={tab==='plan'?'active':''} onClick={()=>setTab('plan')}>Plan</button>
-        <button className={tab==='historico'?'active':''} onClick={()=>setTab('historico')}>Acumulado</button>
-      </div>
 
       {tab==='mes' && (
         <React.Fragment>
@@ -496,13 +538,10 @@ function App(){
 
               {!isFuture && varBudget > 0 && (
                 <>
-                  <div className="hero-bar">
-                    <div style={{width:`${clamp(varSpent/varBudget*100,0,100)}%`}}/>
-                    {isCurrent && <span className="pace-tick" style={{left:`${dayFrac*100}%`}}/>}
-                  </div>
-                  <div className="hero-foot">
-                    <span>{fmt(varSpent)} de {fmt(varBudget)} variable</span>
-                    {isCurrent && <span>Día {dayNow} de {daysInMonth}</span>}
+                  <Cota spent={varSpent} budget={varBudget} dayFrac={isCurrent ? dayFrac : null} over={varLeft<0}/>
+                  <div className="hero-sheet">
+                    <span>Día a día · {fmt(varSpent)} de {fmt(varBudget)}</span>
+                    <span>{isCurrent ? `Día ${dayNow}/${daysInMonth}` : monthLabelShort(month)}</span>
                   </div>
                 </>
               )}
@@ -610,7 +649,7 @@ function App(){
               {[...catsByKind('ahorro'), ...catsByKind('inversion')].map(cat=>{
                 const amt = spentByCat[cat.id] || 0;
                 const planAmt = planOf(cat.id);
-                const col = cat.kind==='inversion' ? 'var(--warn)' : 'var(--accent)';
+                const col = cat.kind==='inversion' ? 'var(--invest)' : 'var(--accent)';
                 const done = planAmt>0 && amt>=planAmt;
                 return (
                   <div key={cat.id} className="cat-row" onClick={()=>setAddOpen({ type:'expense', catId:cat.id, amount: planAmt>amt ? planAmt-amt : undefined })}>
@@ -681,7 +720,10 @@ function App(){
             </div>
             <input type="number" inputMode="decimal" value={data.plan.sueldo||''} placeholder="0"
               onChange={e=>setPlanSueldo(e.target.value)}
-              style={{width:'100%', padding:'10px 11px', borderRadius:10, border:'1px solid var(--border)', background:'var(--surface-2)', color:'var(--ink)', fontFamily:"'IBM Plex Mono',monospace", fontSize:18, fontWeight:600}}/>
+              style={{width:'100%', padding:'10px 11px', borderRadius:10, border:'1px solid var(--border)', background:'var(--surface-2)', color:'var(--ink)', fontFamily:"'Archivo',sans-serif", fontSize:18, fontWeight:600}}/>
+            {(()=>{ const asig = Object.values(data.plan.categories||{}).reduce((a,b)=>a+Number(b||0),0); const libre=(Number(data.plan.sueldo)||0)-asig; return (
+              <div className="plan-split"><span>Asignado <b className="num">{fmt(asig)}</b></span><span style={{color: libre<0?'var(--danger)':undefined}}>{libre<0 ? 'Te pasas en ' : 'Sin asignar '}<b className="num" style={{color: libre<0?'var(--danger)':'var(--accent)'}}>{fmt(Math.abs(libre))}</b></span></div>
+            ); })()}
           </div>
 
           {['gasto','ahorro','inversion'].map(kind=>{
@@ -694,10 +736,12 @@ function App(){
                   {cats.map(cat=>(
                     <div key={cat.id} className="cat-row" style={{cursor:'default'}}>
                       <div className="cat-icon" style={{background:cat.color+'22', color:cat.color}}><Icon name={cat.icon}/></div>
-                      <div className="cat-mid"><div className="cat-name">{cat.name}</div></div>
-                      <input type="number" inputMode="decimal" value={(data.plan.categories||{})[cat.id] || ''} placeholder="0"
-                        onChange={e=>setPlanCat(cat.id, e.target.value)}
-                        style={{width:78, textAlign:'right', border:'none', background:'none', color:'var(--ink)', fontFamily:"'IBM Plex Mono',monospace", fontSize:14.5, fontWeight:600, outline:'none'}}/>
+                      <div className="cat-mid"><div className="cat-name">{cat.name}</div>{cat.kind==='gasto' && <div className="tag-fixed">{cat.fixed ? 'Fijo' : 'Día a día'}</div>}</div>
+                      <label className="plan-input">
+                        <input type="number" inputMode="decimal" value={(data.plan.categories||{})[cat.id] || ''} placeholder="0"
+                          onChange={e=>setPlanCat(cat.id, e.target.value)}/>
+                        <span>€</span>
+                      </label>
                     </div>
                   ))}
                 </div>
@@ -711,7 +755,7 @@ function App(){
         <React.Fragment>
           <div className="grid3" style={{gridTemplateColumns:'1fr 1fr', marginBottom:9}}>
             <div className="stat-mini"><div className="l">Ahorrado</div><div className="v num" style={{color:'var(--accent)'}}>{fmt(allTimeAhorro)}</div></div>
-            <div className="stat-mini"><div className="l">Invertido</div><div className="v num" style={{color:'var(--warn)'}}>{fmt(allTimeInversion)}</div></div>
+            <div className="stat-mini"><div className="l">Invertido</div><div className="v num" style={{color:'var(--invest)'}}>{fmt(allTimeInversion)}</div></div>
           </div>
           <div className="grid3" style={{marginBottom:16}}>
             <div className="stat-mini"><div className="l">Ingresado</div><div className="v num">{fmt(allTimeIncome)}</div></div>
@@ -751,12 +795,20 @@ function App(){
         </React.Fragment>
       )}
 
-      {tab!=='plan' && <button className="fab" onClick={()=>setAddOpen({ type:'expense' })}><Icon name="plus"/></button>}
+      <nav className="bottom-nav">
+        <div className="bottom-nav-inner">
+          <button className={`nav-btn ${tab==='mes'?'active':''}`} onClick={()=>setTab('mes')}><Icon name="navMes"/>Mes</button>
+          <button className={`nav-btn ${tab==='plan'?'active':''}`} onClick={()=>setTab('plan')}><Icon name="navPlan"/>Plan</button>
+          <button className="fab" aria-label="Apuntar movimiento" onClick={()=>setAddOpen({ type:'expense' })}><Icon name="plus"/></button>
+          <button className={`nav-btn ${tab==='historico'?'active':''}`} onClick={()=>setTab('historico')}><Icon name="navAcum"/>Acumulado</button>
+        </div>
+      </nav>
 
       {addOpen && (
         <AddTxnModal
           initial={addOpen}
           categories={data.categories}
+          usage={usage}
           onClose={()=>setAddOpen(null)}
           onSave={(t)=>{ addOrUpdateTxn(t); setAddOpen(null); try{ navigator.vibrate && navigator.vibrate(12); }catch(e){} }}
           onDelete={addOpen.id ? ()=>{ deleteTxn(addOpen.id); setAddOpen(null); } : undefined}
@@ -773,69 +825,91 @@ function App(){
       )}
       {dataOpen && <DataModal data={data} setData={setData} onClose={()=>setDataOpen(false)}/>}
 
-      <div style={{textAlign:'center', marginTop:22}}>
-        <a style={{fontSize:12, color:'var(--faint)', fontWeight:600, cursor:'pointer'}} onClick={()=>setDataOpen(true)}>Copia de seguridad</a>
-      </div>
     </div>
   );
 }
 
-function AddTxnModal({ initial, categories, onClose, onSave, onDelete }){
+function parseAmount(str){ return Number((str||'').replace(',', '.')) || 0; }
+function amountToStr(n){ if(n==null || n==='') return ''; const v = Math.round(Number(n)*100)/100; return String(v).replace('.', ','); }
+
+function AddTxnModal({ initial, categories, usage, onClose, onSave, onDelete }){
   const isEdit = !!initial.id;
+  const sortByUse = (list) => [...list].sort((x,y)=> (usage[y.id]||0) - (usage[x.id]||0));
+  const expenseOpts = useMemo(()=> sortByUse(categories), [categories, usage]);
+  const incomeOpts = useMemo(()=> sortByUse(INCOME_SOURCES), [usage]);
   const [type, setType] = useState(initial.type || 'expense');
-  const [amount, setAmount] = useState(initial.amount != null ? String(initial.amount) : '');
-  const [catId, setCatId] = useState(initial.catId || (initial.type==='income' ? INCOME_SOURCES[0].id : categories[0]?.id));
+  const [amount, setAmount] = useState(amountToStr(initial.amount));
+  const [catId, setCatId] = useState(initial.catId || (initial.type==='income' ? incomeOpts[0].id : expenseOpts[0]?.id));
   const [note, setNote] = useState(initial.note || '');
   const [date, setDate] = useState(initial.date || todayISO());
-  const firstRun = React.useRef(true);
+  const firstRun = useRef(true);
 
   useEffect(()=>{
     if (firstRun.current) { firstRun.current = false; return; }
-    setCatId(type==='expense' ? (categories[0]?.id||'') : INCOME_SOURCES[0].id);
+    setCatId(type==='expense' ? (expenseOpts[0]?.id||'') : incomeOpts[0].id);
   }, [type]);
 
-  const options = type==='expense' ? categories : INCOME_SOURCES;
-
+  const options = type==='expense' ? expenseOpts : incomeOpts;
+  const press = (k) => {
+    try{ navigator.vibrate && navigator.vibrate(6); }catch(e){}
+    setAmount(prev=>{
+      if (k==='del') return prev.slice(0,-1);
+      if (k===',') return prev.includes(',') ? prev : (prev==='' ? '0,' : prev+',');
+      if (prev.includes(',') && prev.split(',')[1].length>=2) return prev;
+      if (prev==='0') return k;
+      if (prev.replace(',','').length>=7) return prev;
+      return prev + k;
+    });
+  };
+  const n = parseAmount(amount);
   const submit = () => {
-    const n = Number(amount);
     if(!n || n<=0 || !catId) return;
     onSave({ ...(isEdit ? { id: initial.id } : {}), type, amount:n, catId, note:note.trim(), date });
   };
+  const cat = options.find(o=>o.id===catId);
+  const dateLabel = date===todayISO() ? 'Hoy' : dayLabel(date);
+  const [ip, dp] = amount.split(',');
+  const intPart = ip ? new Intl.NumberFormat('es-ES').format(Number(ip)) : '0';
 
   return (
-    <Modal title={isEdit ? (type==='expense' ? 'Editar gasto' : 'Editar ingreso') : (type==='expense' ? 'Nuevo gasto' : 'Nuevo ingreso')} onClose={onClose}>
+    <Modal title={isEdit ? 'Editar movimiento' : (type==='expense' ? 'Nuevo gasto' : 'Nuevo ingreso')} onClose={onClose}>
       <div className="type-toggle">
         <button className={`expense ${type==='expense'?'active':''}`} onClick={()=>setType('expense')}><Icon name="arrowDown"/>Gasto</button>
         <button className={`income ${type==='income'?'active':''}`} onClick={()=>setType('income')}><Icon name="arrowUp"/>Ingreso</button>
       </div>
 
-      <div className="field">
-        <label>Importe</label>
-        <input autoFocus type="number" inputMode="decimal" value={amount} onChange={e=>setAmount(e.target.value)} placeholder="0,00"/>
-      </div>
-
-      <div className="field">
-        <label>{type==='expense' ? '¿De qué sector es?' : '¿De dónde viene?'}</label>
-        <div className="chip-row">
-          {options.map(o=>(
-            <div key={o.id} className={`chip ${catId===o.id?'active':''}`} style={{'--chip-color':o.color}} onClick={()=>setCatId(o.id)}>
-              <Icon name={o.icon}/>{o.name}
-            </div>
-          ))}
+      <div className="qa-amount">
+        <div className={`v num ${amount===''?'empty':''}`} style={{color: amount!=='' && type==='income' ? 'var(--accent)' : undefined}}>
+          {intPart}{amount.includes(',') && <>,{dp}</>}<span className="cur">€</span>
         </div>
+        <div className="hint">{cat ? (type==='expense' ? `en ${cat.name}` : `de ${cat.name}`) : ''}</div>
       </div>
 
-      <div className="field">
-        <label>Nota (opcional)</label>
-        <input type="text" value={note} onChange={e=>setNote(e.target.value)} placeholder={type==='income' ? 'Ej. Bizum de Jon' : 'Ej. Compra semanal'}/>
+      <div className="qa-cats">
+        {options.map(o=>(
+          <div key={o.id} className={`chip ${catId===o.id?'active':''}`} style={{'--chip-color':o.color}} onClick={()=>setCatId(o.id)}>
+            <Icon name={o.icon}/>{o.name}
+          </div>
+        ))}
       </div>
 
-      <div className="field">
-        <label>Fecha</label>
-        <input type="date" value={date} onChange={e=>setDate(e.target.value)}/>
+      <div className="qa-meta">
+        <input type="text" value={note} onChange={e=>setNote(e.target.value)} placeholder={type==='income' ? 'Nota: bizum de Jon' : 'Nota (opcional)'}/>
+        <label className="qa-date"><Icon name="calendar"/>{dateLabel}
+          <input type="date" value={date} onChange={e=>e.target.value && setDate(e.target.value)}/>
+        </label>
       </div>
 
-      <button className="btn btn-primary" onClick={submit}>{isEdit ? 'Guardar cambios' : (type==='expense' ? 'Guardar gasto' : 'Guardar ingreso')}</button>
+      <div className="keypad">
+        {['1','2','3','4','5','6','7','8','9'].map(k=> <button key={k} className="key num" onClick={()=>press(k)}>{k}</button>)}
+        <button className="key fn" onClick={()=>press(',')}>,</button>
+        <button className="key num" onClick={()=>press('0')}>0</button>
+        <button className="key fn" aria-label="Borrar" onClick={()=>press('del')}><Icon name="backspace"/></button>
+      </div>
+
+      <button className="btn btn-primary" disabled={!n || !catId} onClick={submit}>
+        {isEdit ? 'Guardar cambios' : n ? `Guardar ${fmtExact(n)}` : (type==='expense' ? 'Guardar gasto' : 'Guardar ingreso')}
+      </button>
       {isEdit && <button className="btn btn-ghost" style={{color:'var(--danger)'}} onClick={onDelete}>Eliminar movimiento</button>}
     </Modal>
   );
@@ -969,13 +1043,13 @@ function DataModal({ data, setData, onClose }){
       <div className="field">
         <label>Exportar (copia y guarda este texto)</label>
         <textarea readOnly value={exportText} onFocus={e=>e.target.select()}
-          style={{width:'100%', minHeight:110, fontFamily:"'IBM Plex Mono',monospace", fontSize:11, padding:10, borderRadius:10, border:'1px solid var(--border)', background:'var(--surface-2)', color:'var(--ink)'}}/>
+          style={{width:'100%', minHeight:110, fontFamily:"'Archivo',sans-serif", fontSize:11, padding:10, borderRadius:10, border:'1px solid var(--border)', background:'var(--surface-2)', color:'var(--ink)'}}/>
       </div>
       <button className="btn btn-primary" onClick={copy}>Copiar al portapapeles</button>
       <div className="field" style={{marginTop:16}}>
         <label>Importar (pega un JSON exportado antes)</label>
         <textarea value={importText} onChange={e=>setImportText(e.target.value)} placeholder="Pega aquí…"
-          style={{width:'100%', minHeight:90, fontFamily:"'IBM Plex Mono',monospace", fontSize:11, padding:10, borderRadius:10, border:'1px solid var(--border)', background:'var(--surface)', color:'var(--ink)'}}/>
+          style={{width:'100%', minHeight:90, fontFamily:"'Archivo',sans-serif", fontSize:11, padding:10, borderRadius:10, border:'1px solid var(--border)', background:'var(--surface)', color:'var(--ink)'}}/>
       </div>
       <button className="btn btn-ghost" onClick={doImport}>Importar y sobrescribir</button>
       {msg && <div className="copy-ok" style={{color: msg.ok?'var(--accent)':'var(--danger)'}}>{msg.text}</div>}
