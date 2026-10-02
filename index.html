@@ -357,6 +357,46 @@
   .sum-row .sw{ width:9px; height:9px; border-radius:3px; flex-shrink:0; }
   .sum-row .name{ flex:1; font-weight:600; }
   .sum-row .num{ font-weight:700; }
+  .scan-btn{ display:flex; align-items:center; gap:12px; width:100%; text-align:left; padding:12px 14px; margin:10px 0 2px; border-radius:16px; cursor:pointer;
+    border:1px solid rgba(180,140,255,0.35); background:linear-gradient(135deg, rgba(180,140,255,0.16), rgba(255,122,26,0.08)); color:var(--ink); font-family:inherit; }
+  .scan-btn > svg{ width:22px; height:22px; color:var(--invest); flex-shrink:0; }
+  .scan-btn span{ flex:1; display:flex; flex-direction:column; }
+  .scan-btn b{ font-size:14.5px; font-weight:700; }
+  .scan-btn small{ font-size:12px; color:var(--muted); }
+  .scan-btn .spark{ width:18px; height:18px; color:var(--amber); }
+  .scan-backdrop{ background:rgba(10,6,16,0.92); backdrop-filter:blur(6px); -webkit-backdrop-filter:blur(6px); align-items:center; }
+  .scan-loading{ margin:auto; text-align:center; padding:28px 24px; }
+  .scan-thumb{ position:relative; width:160px; height:210px; margin:0 auto 18px; border-radius:16px; background-size:cover; background-position:center; overflow:hidden; border:1px solid rgba(180,140,255,0.4); box-shadow:0 0 40px rgba(180,140,255,0.25); }
+  .scan-beam{ position:absolute; left:0; right:0; height:40px; background:linear-gradient(180deg, transparent, rgba(255,122,26,0.55), transparent); animation:beam 1.4s ease-in-out infinite alternate; }
+  @keyframes beam{ from{ top:-40px; } to{ top:100%; } }
+  .scan-loading-title{ font-family:var(--display); font-size:22px; font-weight:600; color:var(--ink); }
+  .scan-loading-sub{ font-size:13px; color:var(--muted); margin-top:4px; }
+  .scan-previews{ display:flex; gap:8px; margin-bottom:12px; overflow-x:auto; }
+  .scan-prev{ width:56px; height:72px; border-radius:10px; flex-shrink:0; background-size:cover; background-position:center; border:1px solid var(--line); }
+  .scan-list{ display:flex; flex-direction:column; gap:8px; margin-bottom:14px; }
+  .scan-item{ border:1px solid var(--line); background:var(--bg); border-radius:16px; padding:10px 12px; transition:opacity .15s; }
+  .scan-item.off{ opacity:0.5; }
+  .scan-row1{ display:flex; align-items:center; gap:10px; }
+  .scan-check{ width:26px; height:26px; border-radius:8px; border:1.5px solid var(--line); background:none; color:transparent; display:flex; align-items:center; justify-content:center; flex-shrink:0; cursor:pointer; }
+  .scan-check.on{ background:var(--accent); border-color:var(--accent); color:var(--accent-ink); }
+  .scan-check svg{ width:15px; height:15px; stroke-width:3; }
+  .scan-note{ flex:1; min-width:0; border:none; background:none; color:var(--ink); font-size:15px; font-weight:650; outline:none; padding:2px 0; }
+  .scan-amt{ display:flex; align-items:baseline; gap:2px; flex-shrink:0; font-weight:750; }
+  .scan-amt input{ width:70px; text-align:right; border:none; background:none; color:var(--ink); font-size:16px; font-weight:750; outline:none; font-family:var(--display); }
+  .scan-amt span{ color:var(--muted); }
+  .scan-amt span.inc{ color:var(--accent); }
+  .scan-row2{ display:flex; align-items:center; gap:8px; margin-top:8px; padding-left:36px; }
+  .scan-dot{ width:8px; height:8px; border-radius:50%; flex-shrink:0; }
+  .scan-row2 select, .scan-row2 input[type=date]{ border:1px solid var(--line); background:var(--surface); color:var(--ink); border-radius:9px; padding:5px 8px; font-size:12.5px; font-family:inherit; min-width:0; }
+  .scan-row2 select{ flex:1; }
+  .scan-row2 input[type=date]{ width:118px; flex-shrink:0; }
+  .scan-type{ border:1px solid var(--line); background:var(--surface); color:var(--muted); border-radius:9px; padding:5px 8px; font-size:12px; font-weight:600; cursor:pointer; flex-shrink:0; }
+  .scan-dup{ font-size:11.5px; color:var(--warn); margin:8px 0 0 36px; }
+  .ai-intro{ font-size:14px; color:var(--muted); line-height:1.45; margin-bottom:10px; }
+  .ai-steps{ margin:0 0 14px; padding-left:20px; font-size:14px; line-height:1.55; color:var(--ink); }
+  .ai-steps a{ color:var(--amber); font-weight:600; }
+  .ai-status{ display:flex; align-items:center; justify-content:space-between; gap:10px; padding:12px 14px; border-radius:16px; background:var(--bg); border:1px solid var(--line); }
+  .ai-status b{ color:var(--accent); }
   .copy-ok{ font-size:12.5px; text-align:center; margin-top:8px; font-weight:600; }
   .empty-hint{ text-align:center; color:var(--faint); font-size:13.5px; padding:18px 0; }
 </style>

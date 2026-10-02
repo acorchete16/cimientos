@@ -38,6 +38,8 @@ const Icon = ({ name, ...p }) => {
     navPlan: <><path d="M4 20V9l8-5 8 5v11"/><path d="M4 20h16"/><path d="M9 20v-6h6v6"/></>,
     navAcum: <><path d="M4 19h16"/><path d="M6 16v-4M10 16V8M14 16v-6M18 16V5"/></>,
     backup: <><ellipse cx="12" cy="6" rx="7" ry="2.6"/><path d="M5 6v6c0 1.4 3.1 2.6 7 2.6s7-1.2 7-2.6V6"/><path d="M5 12v6c0 1.4 3.1 2.6 7 2.6s7-1.2 7-2.6v-6"/></>,
+    camera: <><path d="M4 8.5A1.5 1.5 0 0 1 5.5 7h2l1.5-2h6l1.5 2h2A1.5 1.5 0 0 1 20 8.5v9a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 17.5z"/><circle cx="12" cy="12.5" r="3.4"/></>,
+    sparkle: <path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8zM19 16l.8 2.2L22 19l-2.2.8L19 22l-.8-2.2L16 19l2.2-.8z"/>,
     check: <path d="M5 12.5l4.5 4.5L19 7.5"/>,
     edit: <><path d="M4 20h4L18.5 9.5a2.1 2.1 0 0 0-3-3L4.5 17z"/><path d="M13.5 6.5l4 4"/></>,
   };
@@ -415,6 +417,31 @@ function App(){
       if (a==='expense' || a==='income') { setAddOpen({ type:a }); history.replaceState(null, '', location.pathname); }
     }catch(e){}
   }, []);
+  const [scan, setScan] = useState(null); // {status:'loading'|'review', result, previews}
+  const [aiKeyOpen, setAiKeyOpen] = useState(false);
+  const pendingFiles = useRef(null);
+  const startScan = async (files) => {
+    if (!files || !files.length) return;
+    setAddOpen(null);
+    if (!getAIKey()) { pendingFiles.current = files; setAiKeyOpen(true); return; }
+    let previews = [];
+    try { previews = [await resizeImage(files[0], 600)].map(x=>x.dataUrl); } catch(e){}
+    setScan({ status:'loading', previews });
+    try {
+      const result = await readReceipts(files, data.categories);
+      setScan({ status:'review', result });
+    } catch(e) {
+      setScan(null);
+      if (e.message==='NO_KEY') { pendingFiles.current = files; setAiKeyOpen(true); return; }
+      setBackupMsg(e.message); setTimeout(()=>setBackupMsg(null), 4500);
+    }
+  };
+  const saveScanned = (list) => {
+    setData(d=>({ ...d, txns:[...d.txns, ...list.map(t=>({ ...t, id:uid(), via:'scan' }))] }));
+    setScan(null);
+    try{ navigator.vibrate && navigator.vibrate(12); }catch(e){}
+    setBackupMsg(list.length===1 ? 'Movimiento guardado' : `${list.length} movimientos guardados`); setTimeout(()=>setBackupMsg(null), 2500);
+  };
   const removeDemo = () => setData(d=>({ ...d, txns: d.txns.filter(t=>!isDemoTxn(t)),
     plan: isDemoDerivedPlan(d.plan) ? JSON.parse(JSON.stringify(EXAMPLE_PLAN)) : d.plan }));
 
@@ -958,6 +985,7 @@ function App(){
           initial={addOpen}
           categories={data.categories}
           usage={usage}
+          onScan={startScan}
           onClose={()=>setAddOpen(null)}
           onSave={(t)=>{ addOrUpdateTxn(t); setAddOpen(null); try{ navigator.vibrate && navigator.vibrate(12); }catch(e){} }}
           onDelete={addOpen.id ? ()=>{ deleteTxn(addOpen.id); setAddOpen(null); } : undefined}
@@ -972,6 +1000,10 @@ function App(){
           onDelete={()=>{ deleteCategory(editCatOpen.id); setEditCatOpen(null); }}
         />
       )}
+      {aiKeyOpen && <AIKeyModal onClose={()=>{ setAiKeyOpen(false); pendingFiles.current=null; }}
+        onConnected={()=>{ setAiKeyOpen(false); const f = pendingFiles.current; pendingFiles.current=null; if (f) startScan(f); else { setBackupMsg('Lectura de tickets activada'); setTimeout(()=>setBackupMsg(null), 2500); } }}/>}
+      {scan && scan.status==='loading' && <ScanLoading previews={scan.previews}/>}
+      {scan && scan.status==='review' && <ScanReviewModal result={scan.result} categories={data.categories} existing={data.txns} onClose={()=>setScan(null)} onSave={saveScanned}/>}
       {summaryMonth && <MonthSummaryModal stats={monthStats(data, summaryMonth)} prev={monthStats(data, addMonths(summaryMonth,-1))} catById={catById}
         onClose={closeSummary} onOpenMonth={()=>{ setMonth(summaryMonth); setTab('mes'); closeSummary(); }}/>}
       {goalEdit && <GoalModal goal={goalEdit} onClose={()=>setGoalEdit(null)} onSave={(g)=>{ saveGoal(g); setGoalEdit(null); }} onDelete={goalEdit.id ? ()=>{ deleteGoal(goalEdit.id); setGoalEdit(null); } : null}/>}
@@ -984,9 +1016,11 @@ function App(){
 function parseAmount(str){ return Number((str||'').replace(',', '.')) || 0; }
 function amountToStr(n){ if(n==null || n==='') return ''; const v = Math.round(Number(n)*100)/100; return String(v).replace('.', ','); }
 
-function AddTxnModal({ initial, categories, usage, onClose, onSave, onDelete }){
+function AddTxnModal({ initial, categories, usage, onClose, onSave, onDelete, onScan }){
+  const scanRef = useRef(null);
   const isEdit = !!initial.id;
-  const sortByUse = (list) => [...list].sort((x,y)=> (usage[y.id]||0) - (usage[x.id]||0));
+  const rank = (c) => (c.kind==='gasto' && !c.fixed) ? 0 : (c.kind==='gasto' ? 1 : 2);
+  const sortByUse = (list) => [...list].sort((x,y)=> ((usage[y.id]||0) - (usage[x.id]||0)) || (rank(x) - rank(y)));
   const expenseOpts = useMemo(()=> sortByUse(categories), [categories, usage]);
   const incomeOpts = useMemo(()=> sortByUse(INCOME_SOURCES), [usage]);
   const [type, setType] = useState(initial.type || 'expense');
@@ -1031,6 +1065,14 @@ function AddTxnModal({ initial, categories, usage, onClose, onSave, onDelete }){
         <button className={`income ${type==='income'?'active':''}`} onClick={()=>setType('income')}><Icon name="arrowUp"/>Ingreso</button>
       </div>
 
+      {!isEdit && onScan && (
+        <>
+          <button className="scan-btn" onClick={()=>scanRef.current && scanRef.current.click()}>
+            <Icon name="camera"/><span><b>Foto del ticket o captura</b><small>La IA lo apunta por ti</small></span><Icon name="sparkle" className="spark"/>
+          </button>
+          <input ref={scanRef} type="file" accept="image/*" multiple style={{display:'none'}} onChange={e=>{ const f=[...(e.target.files||[])]; e.target.value=''; onScan(f); }}/>
+        </>
+      )}
       <div className="qa-amount">
         <div className={`v num ${amount===''?'empty':''}`} style={{color: amount!=='' && type==='income' ? 'var(--accent)' : undefined}}>
           {intPart}{amount.includes(',') && <>,{dp}</>}<span className="cur">€</span>
@@ -1165,6 +1207,210 @@ function GoalModal({ goal, onClose, onSave, onDelete }){
   );
 }
 
+// ---------- Lectura de tickets con IA (Gemini, con la clave del usuario guardada solo en este móvil) ----------
+const AI_KEY = 'cimientos_ai_key';
+const AI_MODEL = 'cimientos_ai_model';
+const getAIKey = () => { try{ return localStorage.getItem(AI_KEY) || ''; }catch(e){ return ''; } };
+const getAIModel = () => { try{ return localStorage.getItem(AI_MODEL) || ''; }catch(e){ return ''; } };
+const setAI = (key, model) => { try{ if(key){ localStorage.setItem(AI_KEY,key); localStorage.setItem(AI_MODEL,model); } else { localStorage.removeItem(AI_KEY); localStorage.removeItem(AI_MODEL); } }catch(e){} };
+const GEMINI = 'https://generativelanguage.googleapis.com/v1beta';
+
+function aiError(status, body){
+  const msg = (body && body.error && body.error.message) || '';
+  if (status===400 && /API key|API_KEY/i.test(msg)) return 'La clave no es válida. Cópiala otra vez desde Google AI Studio.';
+  if (status===403) return 'Esta clave no tiene permiso para usar Gemini. Crea una nueva en Google AI Studio.';
+  if (status===429) return 'Has llegado al límite gratuito por ahora. Espera un minuto y vuelve a probar.';
+  if (status===404) return 'El modelo ya no está disponible. Vuelve a conectar la clave en "Tus datos".';
+  if (status>=500) return 'Google no responde ahora mismo. Prueba en un rato.';
+  return msg ? `Error de Gemini: ${msg.slice(0,120)}` : 'No se pudo leer la imagen.';
+}
+
+async function discoverModel(key){
+  let res;
+  try { res = await fetch(`${GEMINI}/models?pageSize=200&key=${encodeURIComponent(key)}`); }
+  catch(e){ throw new Error('Necesitas conexión para conectar la clave.'); }
+  const body = await res.json().catch(()=>null);
+  if (!res.ok) throw new Error(aiError(res.status, body));
+  const models = ((body && body.models) || [])
+    .filter(m => (m.supportedGenerationMethods||[]).includes('generateContent'))
+    .map(m => m.name.replace(/^models\//,''))
+    .filter(n => /flash/.test(n) && !/(image|tts|live|audio|embed|exp|thinking)/.test(n));
+  if (!models.length) throw new Error('Tu clave no tiene ningún modelo Flash disponible.');
+  const score = (n) => {
+    const v = parseFloat((n.match(/gemini-(\d+(?:\.\d+)?)/)||[])[1]||'0');
+    let s = v*100;
+    if (/lite/.test(n)) s -= 40;
+    if (/preview/.test(n)) s -= 15;
+    if (/latest/.test(n)) s -= 5;
+    if (/-\d{3,}$/.test(n)) s -= 3;   // versiones fechadas, preferimos el alias estable
+    return s;
+  };
+  models.sort((a,b)=>score(b)-score(a));
+  return models[0];
+}
+
+function resizeImage(file, max=1600){
+  return new Promise((resolve, reject)=>{
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      const k = Math.min(1, max/Math.max(img.width, img.height));
+      const c = document.createElement('canvas');
+      c.width = Math.round(img.width*k); c.height = Math.round(img.height*k);
+      c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+      URL.revokeObjectURL(url);
+      const dataUrl = c.toDataURL('image/jpeg', 0.82);
+      resolve({ dataUrl, b64: dataUrl.split(',')[1] });
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('No se pudo abrir la imagen.')); };
+    img.src = url;
+  });
+}
+
+async function readReceipts(files, categories){
+  const key = getAIKey(); let model = getAIModel();
+  if (!key) throw new Error('NO_KEY');
+  if (!model) { model = await discoverModel(key); setAI(key, model); }
+  const imgs = await Promise.all([...files].slice(0,4).map(f=>resizeImage(f)));
+  const today = todayISO();
+  const expenseCats = categories.map(c=>`- ${c.id}: ${c.name} (${c.kind==='gasto' ? (c.fixed?'gasto fijo':'gasto') : c.kind})`).join('\n');
+  const incomeCats = INCOME_SOURCES.map(c=>`- ${c.id}: ${c.name}`).join('\n');
+  const prompt = `Eres el asistente de una app personal de gastos en España. Te paso una o varias imágenes: tickets de compra, facturas o capturas de pantalla de pagos (app del banco, Bizum, Amazon, Glovo...). Extrae los movimientos de dinero.
+
+Reglas:
+- Un movimiento por pago. Un ticket de supermercado o restaurante es UN solo movimiento con el TOTAL pagado, no línea por línea.
+- Si una captura muestra una lista con varios pagos, devuelve uno por cada pago.
+- amount: número positivo en euros (punto decimal). Usa el total final pagado, con IVA y descuentos aplicados.
+- type: "expense" si sale dinero; "income" si entra (Bizum recibido, nómina, devolución).
+- catId para gastos, elige SOLO de esta lista:
+${expenseCats}
+- catId para ingresos, elige SOLO de esta lista:
+${incomeCats}
+- Supermercados y comida para casa van a la categoría de comida. Bares, restaurantes, copas, cine y planes van a ocio si existe esa categoría.
+- note: comercio o concepto corto, máximo 30 caracteres (ej. "Mercadona", "Bizum de Jon", "Cena La Viña").
+- date: formato YYYY-MM-DD. Si no aparece el año, usa ${today.slice(0,4)}. Si no aparece la fecha, usa ${today}.
+- Si no hay ningún importe legible, devuelve items vacío y unreadable true.`;
+  const ids = [...categories.map(c=>c.id), ...INCOME_SOURCES.map(c=>c.id)];
+  const schema = { type:'OBJECT', properties:{
+    items:{ type:'ARRAY', items:{ type:'OBJECT', properties:{
+      type:{ type:'STRING', enum:['expense','income'] },
+      amount:{ type:'NUMBER' },
+      catId:{ type:'STRING', enum: ids },
+      note:{ type:'STRING' },
+      date:{ type:'STRING' },
+    }, required:['type','amount','catId','note','date'] } },
+    unreadable:{ type:'BOOLEAN' },
+  }, required:['items'] };
+  const body = {
+    contents:[{ role:'user', parts:[ ...imgs.map(i=>({ inline_data:{ mime_type:'image/jpeg', data:i.b64 } })), { text: prompt } ] }],
+    generationConfig:{ responseMimeType:'application/json', responseSchema: schema, temperature:0.1 },
+  };
+  let res;
+  try { res = await fetch(`${GEMINI}/models/${model}:generateContent?key=${encodeURIComponent(key)}`, { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify(body) }); }
+  catch(e){ throw new Error('Necesitas conexión para leer tickets.'); }
+  const out = await res.json().catch(()=>null);
+  if (!res.ok) { if (res.status===404) setAI(key, ''); throw new Error(aiError(res.status, out)); }
+  const text = (((out||{}).candidates||[])[0]||{}).content?.parts?.map(p=>p.text||'').join('') || '';
+  let parsed; try { parsed = JSON.parse(text); } catch(e){ throw new Error('La IA no devolvió un resultado válido. Prueba con una foto más nítida.'); }
+  const expIds = new Set(categories.map(c=>c.id)), incIds = new Set(INCOME_SOURCES.map(c=>c.id));
+  const items = (parsed.items||[]).map(it=>{
+    const type = it.type==='income' ? 'income' : 'expense';
+    let catId = it.catId;
+    if (type==='expense' && !expIds.has(catId)) catId = (categories.find(c=>c.kind==='gasto' && !c.fixed) || categories[0]).id;
+    if (type==='income' && !incIds.has(catId)) catId = 'otros';
+    const date = /^\d{4}-\d{2}-\d{2}$/.test(it.date||'') ? it.date : today;
+    return { type, amount: Math.round(Math.abs(Number(it.amount)||0)*100)/100, catId, note:(it.note||'').slice(0,40), date };
+  }).filter(it=>it.amount>0);
+  return { items, previews: imgs.map(i=>i.dataUrl) };
+}
+
+function AIKeyModal({ onClose, onConnected }){
+  const [key, setKey] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState(null);
+  const connect = async () => {
+    const k = key.trim(); if (!k) return;
+    setBusy(true); setErr(null);
+    try { const model = await discoverModel(k); setAI(k, model); onConnected(model); }
+    catch(e){ setErr(e.message); }
+    setBusy(false);
+  };
+  return (
+    <Modal title="Leer tickets con IA" onClose={onClose}>
+      <div className="ai-intro">Para leer fotos de tickets y capturas, la app usa Gemini, la IA de Google. Es gratis, pero necesitas tu propia clave. Se hace una sola vez.</div>
+      <ol className="ai-steps">
+        <li>Abre <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a> e inicia sesión con tu cuenta de Google.</li>
+        <li>Pulsa <b>Create API key</b> y copia la clave que te da.</li>
+        <li>Pégala aquí abajo.</li>
+      </ol>
+      <div className="field"><input type="text" value={key} onChange={e=>setKey(e.target.value)} placeholder="Pega tu clave (empieza por AIza…)" autoCapitalize="off" autoCorrect="off" spellCheck="false"/></div>
+      {err && <div className="copy-ok" style={{color:'var(--danger)', marginBottom:10}}>{err}</div>}
+      <button className="btn btn-primary" disabled={!key.trim() || busy} onClick={connect}>{busy ? 'Comprobando…' : 'Conectar'}</button>
+      <div className="data-hint" style={{marginTop:12}}>La clave se guarda solo en este móvil y no va en las copias de seguridad. Las fotos se envían a Google para leerlas; con la clave gratuita, Google puede usarlas para mejorar sus modelos, así que no fotografíes nada que no quieras compartir.</div>
+    </Modal>
+  );
+}
+
+function ScanLoading({ previews }){
+  return (
+    <div className="modal-backdrop scan-backdrop">
+      <div className="scan-loading">
+        {previews && previews[0] && <div className="scan-thumb" style={{backgroundImage:`url(${previews[0]})`}}><div className="scan-beam"/></div>}
+        <div className="scan-loading-title">Leyendo el ticket…</div>
+        <div className="scan-loading-sub">Suele tardar unos segundos</div>
+      </div>
+    </div>
+  );
+}
+
+function ScanReviewModal({ result, categories, existing, onClose, onSave }){
+  const dupOf = (it) => existing.some(t=>t.date===it.date && Math.abs(Number(t.amount)-it.amount)<0.005 && t.type===it.type);
+  const [items, setItems] = useState(()=>result.items.map(it=>({ ...it, key:uid(), dup:dupOf(it), on:!dupOf(it) })));
+  const upd = (k, patch) => setItems(list=>list.map(it=>it.key===k ? { ...it, ...patch } : it));
+  const chosen = items.filter(it=>it.on && it.amount>0);
+  const total = chosen.reduce((s,it)=>s+(it.type==='income'?1:-1)*it.amount,0);
+  return (
+    <Modal title={items.length ? `He encontrado ${items.length} ${items.length===1?'movimiento':'movimientos'}` : 'No he encontrado importes'} onClose={onClose}>
+      {result.previews && result.previews.length>0 && (
+        <div className="scan-previews">{result.previews.map((p,i)=><div key={i} className="scan-prev" style={{backgroundImage:`url(${p})`}}/>)}</div>
+      )}
+      {items.length===0 && <div className="empty-hint">No he podido leer ningún importe. Prueba con una foto más cerca, recta y con buena luz, o apúntalo a mano.</div>}
+      <div className="scan-list">
+        {items.map(it=>{
+          const opts = it.type==='expense' ? categories : INCOME_SOURCES;
+          const cat = opts.find(o=>o.id===it.catId);
+          return (
+            <div key={it.key} className={`scan-item ${it.on?'':'off'}`}>
+              <div className="scan-row1">
+                <button className={`scan-check ${it.on?'on':''}`} onClick={()=>upd(it.key,{on:!it.on})} aria-label="Incluir"><Icon name="check"/></button>
+                <input className="scan-note" value={it.note} onChange={e=>upd(it.key,{note:e.target.value})} placeholder="Concepto"/>
+                <div className="scan-amt">
+                  <span className={it.type==='income'?'inc':''}>{it.type==='income'?'+':'−'}</span>
+                  <input type="number" inputMode="decimal" value={it.amount} onChange={e=>upd(it.key,{amount:Math.abs(Number(e.target.value))||0})}/>
+                  <span>€</span>
+                </div>
+              </div>
+              <div className="scan-row2">
+                <span className="scan-dot" style={{background: cat ? cat.color : 'var(--faint)'}}/>
+                <select value={it.catId} onChange={e=>upd(it.key,{catId:e.target.value})}>
+                  {opts.map(o=><option key={o.id} value={o.id}>{o.name}</option>)}
+                </select>
+                <input type="date" value={it.date} onChange={e=>e.target.value && upd(it.key,{date:e.target.value})}/>
+                <button className="scan-type" onClick={()=>{ const type = it.type==='expense'?'income':'expense'; upd(it.key,{ type, catId: type==='income' ? 'otros' : (categories.find(c=>c.kind==='gasto')||categories[0]).id }); }}>{it.type==='expense'?'Gasto':'Ingreso'}</button>
+              </div>
+              {it.dup && <div className="scan-dup">Ya tienes un movimiento igual ese día. Lo he desmarcado por si está repetido.</div>}
+            </div>
+          );
+        })}
+      </div>
+      {items.length>0 && <button className="btn btn-primary" disabled={!chosen.length} onClick={()=>onSave(chosen.map(({key,dup,on,...t})=>t))}>
+        {chosen.length ? `Guardar ${chosen.length} · ${total<0?'−':'+'}${fmtExact(Math.abs(total))}` : 'Marca algún movimiento'}
+      </button>}
+      <button className="btn btn-ghost" onClick={onClose}>{items.length ? 'Descartar' : 'Cerrar'}</button>
+    </Modal>
+  );
+}
+
 function KindPicker({ kind, setKind }){
   return (
     <div className="chip-row">
@@ -1272,6 +1518,20 @@ function EditCategoryModal({ category, onClose, onSave, onDelete }){
   );
 }
 
+function AISettings(){
+  const [key, setKeyState] = useState(getAIKey());
+  const [open, setOpen] = useState(false);
+  if (open) return <AIKeyModal onClose={()=>setOpen(false)} onConnected={()=>{ setKeyState(getAIKey()); setOpen(false); }}/>;
+  return key ? (
+    <div className="ai-status">
+      <div><b>Activada</b><div className="data-status-sub">Modelo: {getAIModel() || 'automático'}</div></div>
+      <button className="notice-btn" style={{background:'var(--surface-2)', color:'var(--ink)', border:'1px solid var(--line)'}} onClick={()=>{ setAI(''); setKeyState(''); }}>Desconectar</button>
+    </div>
+  ) : (
+    <button className="btn btn-ghost" style={{marginTop:0}} onClick={()=>setOpen(true)}><Icon name="camera"/>Activar lectura de tickets</button>
+  );
+}
+
 function DataModal({ data, setData, onClose }){
   const [msg, setMsg] = useState(null);
   const [pending, setPending] = useState(null); // datos leídos de un archivo, esperando confirmación
@@ -1336,6 +1596,9 @@ function DataModal({ data, setData, onClose }){
       )}
 
       {msg && <div className="copy-ok" style={{color: msg.ok?'var(--accent)':'var(--danger)'}}>{msg.text}</div>}
+
+      <div className="data-section">Lectura de tickets</div>
+      <AISettings/>
 
       <div className="data-section">Empezar de cero</div>
       {!confirmWipe

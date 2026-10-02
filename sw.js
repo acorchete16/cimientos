@@ -1,4 +1,4 @@
-const CACHE = 'cimientos-v6';
+const CACHE = 'cimientos-v7';
 const ASSETS = ['./', 'index.html', 'app.js', 'react.js', 'react-dom.js', 'manifest.json', 'icon-192.png', 'icon-512.png', 'apple-touch-icon.png', 'archivo.woff2', 'fraunces.woff2'];
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS)).then(() => self.skipWaiting()));
@@ -9,6 +9,7 @@ self.addEventListener('activate', e => {
 // Red primero (para recibir actualizaciones), caché si no hay conexión.
 self.addEventListener('fetch', e => {
   if (e.request.method !== 'GET') return;
+  if (new URL(e.request.url).origin !== self.location.origin) return; // APIs externas (Gemini): nunca a caché
   e.respondWith(
     fetch(e.request).then(res => {
       const copy = res.clone();
