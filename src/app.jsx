@@ -104,7 +104,8 @@ function seed(){
       { id:uid(), type:'income', date:`${mk}-09`, amount:15, catId:'bizum', note:'Cena de Jon' },
       { id:uid(), type:'expense', date:`${mk}-09`, amount:35, catId:'ocio', note:'Cine' },
       { id:uid(), type:'expense', date:`${mk}-11`, amount:12.99, catId:'subs', note:'Spotify' },
-    ],
+    ].map(t=>({ ...t, demo:true })),
+    plan: JSON.parse(JSON.stringify(EXAMPLE_PLAN)),
   };
 }
 
@@ -196,6 +197,45 @@ function DonutChart({ segments, size=130, thickness=18, centerLabel, centerValue
     </div>
   );
 }
+
+// Movimientos de ejemplo que trae la app la primera vez (para poder borrarlos de golpe)
+const DEMO_SIGNATURES = [
+  ['income','sueldo',1750,''], ['expense','piso',650,'Alquiler'], ['expense','comida',42,'Mercadona'],
+  ['expense','transporte',18,'Abono transporte'], ['income','bizum',15,'Cena de Jon'], ['expense','ocio',35,'Cine'],
+  ['expense','subs',12.99,'Spotify'],
+];
+const EXAMPLE_PLAN = { sueldo:1750, categories:{ piso:650, comida:250, agualuz:60, transporte:40, subs:15, gym:35, ocio:150, ahorro:300, inversiones:200 } };
+function isDemoDerivedPlan(plan){
+  const c = (plan && plan.categories) || {};
+  return Number(c.comida)===42 && Number(c.transporte)===18 && Number(c.ocio)===35 && !c.agualuz && !c.gym;
+}
+function isDemoTxn(t){
+  if (t.demo) return true;
+  return DEMO_SIGNATURES.some(([type,catId,amount,note]) => t.type===type && t.catId===catId && Number(t.amount)===amount && (t.note||'')===note);
+}
+function countDemo(txns){
+  // Solo los consideramos de ejemplo si aparecen casi todos juntos (evita borrar un "Alquiler 650" real)
+  const demos = txns.filter(isDemoTxn);
+  return demos.length >= 5 ? demos.length : 0;
+}
+
+async function shareBackup(data){
+  const stamp = todayISO();
+  const json = JSON.stringify({ ...data, meta:{ ...(data.meta||{}), exportedAt:new Date().toISOString() } }, null, 2);
+  const name = `cimientos-copia-${stamp}.json`;
+  let file;
+  try { file = new File([json], name, { type:'application/json' }); } catch(e) {}
+  if (file && navigator.canShare && navigator.canShare({ files:[file] })) {
+    await navigator.share({ files:[file], title:'Copia de Cimientos', text:`Copia de seguridad del ${stamp}` });
+    return 'shared';
+  }
+  const url = URL.createObjectURL(new Blob([json], { type:'application/json' }));
+  const a = document.createElement('a'); a.href = url; a.download = name;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url), 4000);
+  return 'downloaded';
+}
+const daysSince = (iso) => iso ? Math.floor((Date.now() - new Date(iso).getTime())/86400000) : null;
 
 function catStatus(amt, planAmt, dayFrac){
   if (!planAmt) return { key:'none', color:'var(--faint)', text: amt>0 ? 'Sin presupuesto en el plan' : 'Sin gastos' };
@@ -299,6 +339,19 @@ function App(){
   const writeTimer = useRef(null);
 
   useEffect(()=>save(data), [data]);
+  useEffect(()=>{ try{ navigator.storage && navigator.storage.persist && navigator.storage.persist(); }catch(e){} }, []);
+  const [backupMsg, setBackupMsg] = useState(null);
+  const markBackup = () => setData(d=>({ ...d, meta:{ ...(d.meta||{}), lastBackup:new Date().toISOString() } }));
+  const quickBackup = async () => {
+    try { await shareBackup(data); markBackup(); setBackupMsg('Copia guardada'); setTimeout(()=>setBackupMsg(null), 2500); }
+    catch(e){ if (e && e.name!=='AbortError') { setBackupMsg('No se pudo guardar la copia'); setTimeout(()=>setBackupMsg(null), 3000); } }
+  };
+  const demoCount = countDemo(data.txns);
+  const realTxnCount = data.txns.length - demoCount;
+  const backupAge = daysSince(data.meta && data.meta.lastBackup);
+  const needsBackup = realTxnCount >= 5 && (backupAge===null || backupAge >= 7);
+  const removeDemo = () => setData(d=>({ ...d, txns: d.txns.filter(t=>!isDemoTxn(t)),
+    plan: isDemoDerivedPlan(d.plan) ? JSON.parse(JSON.stringify(EXAMPLE_PLAN)) : d.plan }));
 
   // Connect to the account-wide store (if granted) and stay live-synced across devices.
   useEffect(()=>{
@@ -485,6 +538,19 @@ function App(){
 
       {tab==='mes' && (
         <React.Fragment>
+          {demoCount>0 && (
+            <div className="notice">
+              <div className="notice-text"><b>Estos movimientos son de ejemplo.</b> Bórralos para empezar con los tuyos y luego pon tus cifras en Plan.</div>
+              <button className="notice-btn" onClick={removeDemo}>Borrar ejemplos</button>
+            </div>
+          )}
+          {needsBackup && demoCount===0 && (
+            <div className="notice soft">
+              <div className="notice-text">{backupAge===null ? 'Aún no has guardado ninguna copia de tus datos.' : `Hace ${backupAge} días que no guardas copia.`} Si pierdes el móvil, pierdes los datos.</div>
+              <button className="notice-btn" onClick={quickBackup}>Guardar copia</button>
+            </div>
+          )}
+          {backupMsg && <div className="toast">{backupMsg}</div>}
           <div className="month-row">
             <button onClick={()=>setMonth(addMonths(month,-1))}><Icon name="chevL" style={{width:14,height:14}}/></button>
             <div className="val">{monthLabel(month)}</div>
@@ -1007,37 +1073,91 @@ function EditCategoryModal({ category, onClose, onSave, onDelete }){
 }
 
 function DataModal({ data, setData, onClose }){
-  const [importText, setImportText] = useState('');
   const [msg, setMsg] = useState(null);
-  const exportText = JSON.stringify(data, null, 2);
-  const copy = async () => {
-    try{ await navigator.clipboard.writeText(exportText); setMsg({ok:true, text:'Copiado al portapapeles'}); }
-    catch(e){ setMsg({ok:false, text:'No se pudo copiar, selecciona el texto manualmente'}); }
+  const [pending, setPending] = useState(null); // datos leídos de un archivo, esperando confirmación
+  const [confirmWipe, setConfirmWipe] = useState(false);
+  const [showText, setShowText] = useState(false);
+  const [importText, setImportText] = useState('');
+  const fileRef = useRef(null);
+  const age = daysSince(data.meta && data.meta.lastBackup);
+
+  const save = async () => {
+    try {
+      const how = await shareBackup(data);
+      setData(d=>({ ...d, meta:{ ...(d.meta||{}), lastBackup:new Date().toISOString() } }));
+      setMsg({ ok:true, text: how==='shared' ? 'Copia guardada' : 'Copia descargada' });
+    } catch(e) { if (e && e.name!=='AbortError') setMsg({ ok:false, text:'No se pudo guardar. Prueba con "Copiar como texto".' }); }
   };
-  const doImport = () => {
-    try{
-      const parsed = JSON.parse(importText);
-      if(!parsed || !parsed.categories || !parsed.txns) throw new Error('bad');
-      setData(parsed);
-      setMsg({ok:true, text:'Datos importados correctamente'});
-    }catch(e){ setMsg({ok:false, text:'JSON no válido'}); }
+  const validate = (parsed) => parsed && Array.isArray(parsed.categories) && Array.isArray(parsed.txns);
+  const onFile = (e) => {
+    const f = e.target.files && e.target.files[0]; if (!f) return;
+    const r = new FileReader();
+    r.onload = () => {
+      try { const parsed = JSON.parse(r.result); if (!validate(parsed)) throw 0; setPending(parsed); setMsg(null); }
+      catch(err){ setMsg({ ok:false, text:'Ese archivo no es una copia de Cimientos.' }); }
+    };
+    r.readAsText(f); e.target.value = '';
   };
+  const applyPending = (parsed) => { setData(backfillKinds(ensurePlan(parsed, thisMonthKey()))); setPending(null); setMsg({ ok:true, text:`Restaurados ${parsed.txns.length} movimientos` }); };
+  const importFromText = () => {
+    try { const parsed = JSON.parse(importText); if (!validate(parsed)) throw 0; setPending(parsed); }
+    catch(e){ setMsg({ ok:false, text:'El texto pegado no es una copia válida.' }); }
+  };
+  const copyText = async () => {
+    try{ await navigator.clipboard.writeText(JSON.stringify(data)); setMsg({ok:true, text:'Copiado al portapapeles'}); }
+    catch(e){ setMsg({ok:false, text:'No se pudo copiar.'}); }
+  };
+  const wipe = () => { setData(d=>({ ...d, txns:[] })); setConfirmWipe(false); setMsg({ ok:true, text:'Movimientos borrados. El plan y las categorías siguen igual.' }); };
+
   return (
-    <Modal title="Copia de seguridad" onClose={onClose}>
-      <div className="field">
-        <label>Exportar (copia y guarda este texto)</label>
-        <textarea readOnly value={exportText} onFocus={e=>e.target.select()}
-          style={{width:'100%', minHeight:110, fontFamily:"'Archivo',sans-serif", fontSize:11, padding:10, borderRadius:10, border:'1px solid var(--border)', background:'var(--surface-2)', color:'var(--ink)'}}/>
+    <Modal title="Tus datos" onClose={onClose}>
+      <div className="data-status">
+        <div className={`data-dot ${age===null || age>=7 ? 'warn' : 'ok'}`}/>
+        <div>
+          <div className="data-status-title">{age===null ? 'Sin copia todavía' : age===0 ? 'Última copia: hoy' : `Última copia: hace ${age} ${age===1?'día':'días'}`}</div>
+          <div className="data-status-sub">{data.txns.length} movimientos guardados solo en este móvil</div>
+        </div>
       </div>
-      <button className="btn btn-primary" onClick={copy}>Copiar al portapapeles</button>
-      <div className="field" style={{marginTop:16}}>
-        <label>Importar (pega un JSON exportado antes)</label>
-        <textarea value={importText} onChange={e=>setImportText(e.target.value)} placeholder="Pega aquí…"
-          style={{width:'100%', minHeight:90, fontFamily:"'Archivo',sans-serif", fontSize:11, padding:10, borderRadius:10, border:'1px solid var(--border)', background:'var(--surface)', color:'var(--ink)'}}/>
-      </div>
-      <button className="btn btn-ghost" onClick={doImport}>Importar y sobrescribir</button>
+
+      <button className="btn btn-primary" onClick={save}><Icon name="backup"/>Guardar copia</button>
+      <div className="data-hint">Se abre el menú de compartir: guárdala en Archivos, iCloud, Drive o mándatela por WhatsApp.</div>
+
+      <button className="btn btn-ghost" onClick={()=>fileRef.current && fileRef.current.click()}>Restaurar desde un archivo</button>
+      <input ref={fileRef} type="file" accept="application/json,.json" style={{display:'none'}} onChange={onFile}/>
+
+      {pending && (
+        <div className="confirm-box">
+          <div>Esta copia tiene <b>{pending.txns.length} movimientos</b>{pending.meta && pending.meta.exportedAt ? ` (del ${pending.meta.exportedAt.slice(0,10).split('-').reverse().join('/')})` : ''}. Reemplazará todo lo que hay ahora en la app.</div>
+          <div className="confirm-actions">
+            <button className="btn btn-ghost" style={{marginTop:0}} onClick={()=>setPending(null)}>Cancelar</button>
+            <button className="btn btn-primary" onClick={()=>applyPending(pending)}>Restaurar</button>
+          </div>
+        </div>
+      )}
+
       {msg && <div className="copy-ok" style={{color: msg.ok?'var(--accent)':'var(--danger)'}}>{msg.text}</div>}
-      <div className="copy-ok" style={{color:'var(--faint)', fontWeight:500, marginTop:12}}>Tus datos solo viven en este navegador. No se puede descargar un archivo directamente por seguridad — usa copiar/pegar.</div>
+
+      <div className="data-section">Empezar de cero</div>
+      {!confirmWipe
+        ? <button className="btn btn-ghost" style={{color:'var(--danger)'}} onClick={()=>setConfirmWipe(true)}>Borrar todos los movimientos</button>
+        : (
+          <div className="confirm-box danger">
+            <div>Se borrarán los {data.txns.length} movimientos. Tu plan y tus categorías se quedan. Guarda antes una copia si quieres poder volver atrás.</div>
+            <div className="confirm-actions">
+              <button className="btn btn-ghost" style={{marginTop:0}} onClick={()=>setConfirmWipe(false)}>Cancelar</button>
+              <button className="btn btn-primary danger" onClick={wipe}>Borrar</button>
+            </div>
+          </div>
+        )}
+
+      <button className="link-btn" onClick={()=>setShowText(v=>!v)}>{showText ? 'Ocultar opciones de texto' : 'Copiar o pegar como texto'}</button>
+      {showText && (
+        <div style={{marginTop:8}}>
+          <button className="btn btn-ghost" onClick={copyText}>Copiar como texto</button>
+          <textarea value={importText} onChange={e=>setImportText(e.target.value)} placeholder="Pega aquí una copia en texto…" className="data-textarea"/>
+          <button className="btn btn-ghost" onClick={importFromText}>Restaurar desde el texto</button>
+        </div>
+      )}
     </Modal>
   );
 }
