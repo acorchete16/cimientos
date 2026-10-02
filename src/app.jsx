@@ -47,17 +47,18 @@ const Icon = ({ name, ...p }) => {
 const STORAGE_KEY = "cimientos_simple_v2";
 const OLD_KEY = "cimientos_simple_v1";
 const THEME_KEY = "cimientos_simple_theme";
-const COLORS = ["#5B7B9A","#B8792B","#7A6BAE","#B34438","#C25C8A","#3E8FA6","#1F6F54","#8A8676","#D08A3E","#4E7D6B"];
+const COLORS = ["#FF9F43","#8E9BFF","#C77DFF","#EF4B55","#FF6FA5","#5EC8D8","#8FD66A","#FFD166","#B48CFF","#A7B0BF"];
+const OLD_DEFAULT_COLORS = {"#5B7B9A":"#8E9BFF","#B8792B":"#FF9F43","#D08A3E":"#FFD166","#7A6BAE":"#5EC8D8","#3E8FA6":"#C77DFF","#C25C8A":"#FF6FA5","#B34438":"#EF4B55","#2E8F6E":"#8FD66A","#B8862B":"#B48CFF","#1F6F54":"#8FD66A","#8A8676":"#A7B0BF","#4E7D6B":"#7EE0B5"};
 const DEFAULT_CATS = [
-  { id:"piso", name:"Piso", icon:"house", color:"#5B7B9A", kind:"gasto" },
-  { id:"comida", name:"Comida", icon:"food", color:"#B8792B", kind:"gasto" },
-  { id:"agualuz", name:"Agua / Luz", icon:"bolt", color:"#D08A3E", kind:"gasto" },
-  { id:"transporte", name:"Transporte", icon:"car", color:"#7A6BAE", kind:"gasto" },
-  { id:"subs", name:"Suscripciones", icon:"sub", color:"#3E8FA6", kind:"gasto" },
-  { id:"gym", name:"Gym", icon:"dumbbell", color:"#C25C8A", kind:"gasto" },
-  { id:"ocio", name:"Ocio", icon:"fun", color:"#B34438", kind:"gasto" },
-  { id:"ahorro", name:"Ahorro", icon:"piggy", color:"#2E8F6E", kind:"ahorro" },
-  { id:"inversiones", name:"Inversiones", icon:"trend", color:"#B8862B", kind:"inversion" },
+  { id:"piso", name:"Piso", icon:"house", color:"#8E9BFF", kind:"gasto" },
+  { id:"comida", name:"Comida", icon:"food", color:"#FF9F43", kind:"gasto" },
+  { id:"agualuz", name:"Agua / Luz", icon:"bolt", color:"#FFD166", kind:"gasto" },
+  { id:"transporte", name:"Transporte", icon:"car", color:"#5EC8D8", kind:"gasto" },
+  { id:"subs", name:"Suscripciones", icon:"sub", color:"#C77DFF", kind:"gasto" },
+  { id:"gym", name:"Gym", icon:"dumbbell", color:"#FF6FA5", kind:"gasto" },
+  { id:"ocio", name:"Ocio", icon:"fun", color:"#EF4B55", kind:"gasto" },
+  { id:"ahorro", name:"Ahorro", icon:"piggy", color:"#8FD66A", kind:"ahorro" },
+  { id:"inversiones", name:"Inversiones", icon:"trend", color:"#B48CFF", kind:"inversion" },
 ];
 const FIXED_IDS = ["piso","agualuz","subs","gym"];
 const KIND_META = {
@@ -72,11 +73,11 @@ function inferKind(cat){
   return 'gasto';
 }
 const INCOME_SOURCES = [
-  { id:"sueldo", name:"Sueldo", icon:"wallet", color:"#1F6F54" },
-  { id:"bizum", name:"Bizum", icon:"phoneswap", color:"#3E8FA6" },
-  { id:"freelance", name:"Freelance", icon:"briefcase", color:"#B8792B" },
-  { id:"regalo", name:"Regalo", icon:"gift", color:"#C25C8A" },
-  { id:"otros", name:"Otros", icon:"dots3", color:"#8A8676" },
+  { id:"sueldo", name:"Sueldo", icon:"wallet", color:"#8FD66A" },
+  { id:"bizum", name:"Bizum", icon:"phoneswap", color:"#5EC8D8" },
+  { id:"freelance", name:"Freelance", icon:"briefcase", color:"#FF9F43" },
+  { id:"regalo", name:"Regalo", icon:"gift", color:"#FF6FA5" },
+  { id:"otros", name:"Otros", icon:"dots3", color:"#A7B0BF" },
 ];
 const ICONS = ["house","food","bolt","car","sub","dumbbell","trend","fun","health","book","dots3"];
 const MONTHS_ES = ["enero","febrero","marzo","abril","mayo","junio","julio","agosto","septiembre","octubre","noviembre","diciembre"];
@@ -109,7 +110,8 @@ function seed(){
 
 function backfillKinds(d){
   d.categories = (d.categories||[]).map(c => {
-    const k = c.kind ? c : { ...c, kind: inferKind(c) };
+    let k = c.kind ? c : { ...c, kind: inferKind(c) };
+    if (OLD_DEFAULT_COLORS[k.color]) k = { ...k, color: OLD_DEFAULT_COLORS[k.color] };
     return k.fixed===undefined ? { ...k, fixed: k.kind==='gasto' && FIXED_IDS.includes(k.id) } : k;
   });
   return d;
@@ -180,7 +182,7 @@ function DonutChart({ segments, size=130, thickness=18, centerLabel, centerValue
           return <circle key={i} cx={cx} cy={cy} r={r} fill="none" stroke={s.color} strokeWidth={thickness}
             strokeDasharray={`${dash} ${gap}`} strokeDashoffset={offset} transform={`rotate(-90 ${cx} ${cy})`}/>;
         })}
-        <text x={cx} y={cy-3} textAnchor="middle" style={{fontSize:14, fill:'var(--ink)', fontFamily:"'Archivo',sans-serif", fontWeight:800}}>{centerValue}</text>
+        <text x={cx} y={cy-3} textAnchor="middle" style={{fontSize:16, fill:'var(--ink)', fontFamily:"'Fraunces',serif", fontWeight:600}}>{centerValue}</text>
         <text x={cx} y={cy+13} textAnchor="middle" style={{fontSize:9, fill:'var(--muted)', fontFamily:"'Archivo',sans-serif"}}>{centerLabel}</text>
       </svg>
       <div className="donut-legend">
@@ -236,33 +238,14 @@ function AnimatedMoney({ value }){
 }
 
 function Cota({ spent, budget, dayFrac, over }){
-  // Línea de cota estilo plano: 0 → presupuesto, relleno = gastado, marca = dónde deberías ir hoy
-  const W = 320, x0 = 8, x1 = W-8, yL = 30;
-  const X = (f) => x0 + clamp(f,0,1)*(x1-x0);
-  const fs = budget>0 ? spent/budget : 0;
-  const col = over ? 'var(--danger)' : (dayFrac!=null && fs > dayFrac*1.1 ? 'var(--amber)' : 'var(--accent)');
-  const ticks = [0.25,0.5,0.75];
+  // Barra "mecha": relleno = gastado del presupuesto variable, marca = donde deberías ir hoy
+  const fs = budget>0 ? clamp(spent/budget, 0, 1) : 0;
+  const state = over ? 'over' : (dayFrac!=null && spent/budget > dayFrac*1.1 ? '' : 'ok');
   return (
-    <svg className="cota" viewBox={`0 0 ${W} 62`} preserveAspectRatio="none" aria-hidden="true">
-      <line x1={x0} y1={yL-12} x2={x0} y2={yL+12} stroke="#5A7590" strokeWidth="1"/>
-      <line x1={x1} y1={yL-12} x2={x1} y2={yL+12} stroke="#5A7590" strokeWidth="1"/>
-      <line x1={x0} y1={yL} x2={x1} y2={yL} stroke="#3A5470" strokeWidth="1"/>
-      <path d={`M${x0} ${yL} l7 -3.5 v7 z`} fill="#5A7590"/>
-      <path d={`M${x1} ${yL} l-7 -3.5 v7 z`} fill="#5A7590"/>
-      {ticks.map(t=> <line key={t} x1={X(t)} y1={yL-4} x2={X(t)} y2={yL+4} stroke="#3A5470"/>)}
-      <rect x={x0} y={yL-3} width={Math.max(0, X(fs)-x0)} height="6" rx="1.5" fill={col}/>
-      {fs>1 && <rect x={x1-2} y={yL-6} width="4" height="12" fill="var(--danger)"/>}
-      {dayFrac!=null && (
-        <g>
-          <line x1={X(dayFrac)} y1={yL-14} x2={X(dayFrac)} y2={yL+8} stroke="var(--ink)" strokeWidth="1.2" strokeDasharray="2 2"/>
-          <path d={`M${X(dayFrac)-4} ${yL-19} h8 l-4 5 z`} fill="var(--ink)"/>
-          <text x={clamp(X(dayFrac), x0+14, x1-14)} y={yL-23} textAnchor="middle" className="strong">hoy</text>
-        </g>
-      )}
-      <text x={x0} y={yL+24}>0 €</text>
-      <text x={x1} y={yL+24} textAnchor="end" className="strong">{fmt(budget)}</text>
-      {fs>0.12 && fs<0.85 && <text x={X(fs)} y={yL+24} textAnchor="middle" style={{fill:col}}>{fmt(spent)}</text>}
-    </svg>
+    <div className="mecha" aria-hidden="true">
+      <div className={`mecha-fill ${state}`} style={{width:`${Math.max(fs*100, fs>0?3:0)}%`}}/>
+      {dayFrac!=null && <div className="mecha-hoy" style={{left:`${clamp(dayFrac,0,1)*100}%`}}><span>hoy</span></div>}
+    </div>
   );
 }
 
@@ -480,8 +463,9 @@ function App(){
         <div className="brand">
           <div className="brand-mark">
             <svg viewBox="0 0 30 30" fill="none">
-              <rect x="1" y="1" width="28" height="28" rx="8" fill="#121E2B" stroke="#2A4058"/>
-              <path d="M7 21h16M9 21v-5h12v5M11 16v-4h8v4M13 12V9h4v3" stroke="#F4B740" strokeWidth="1.7" strokeLinejoin="round"/>
+              <defs><radialGradient id="bm" cx="0.35" cy="0.3" r="0.8"><stop offset="0" stopColor="#FFA04D"/><stop offset="1" stopColor="#E2550A"/></radialGradient></defs>
+              <circle cx="15" cy="15" r="14" fill="url(#bm)"/>
+              <path d="M8 21h14M10 21v-4.5h10V21M12 16.5V13h6v3.5M13.8 13v-2.6h2.4V13" stroke="#2B1103" strokeWidth="1.7" strokeLinejoin="round" strokeLinecap="round"/>
             </svg>
           </div>
           <div>
