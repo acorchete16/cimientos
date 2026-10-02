@@ -504,6 +504,12 @@
   .pick-name{ display:block; font-weight:650; font-size:14px; }
   .pick-sub{ display:block; font-size:12px; color:var(--faint); margin-top:2px; }
   .field select{ width:100%; padding:11px 12px; border-radius:11px; border:1px solid var(--line); background:var(--bg); color:var(--ink); font-size:15px; }
+  .top-actions{ display:flex; gap:8px; align-items:center; }
+  .top-actions .icon-btn{ width:auto; min-width:36px; padding:0 10px; border-radius:18px; gap:6px; font-size:13px; font-weight:650; color:var(--muted); }
+  .top-actions .icon-btn span{ display:inline; }
+  .top-actions .icon-btn[aria-label="Copia de seguridad"]{ padding:0; width:36px; }
+  .top-actions .icon-btn.on{ color:var(--amber); border-color:rgba(255,122,26,0.45); background:var(--amber-soft); }
+  .tab-title{ font-family:var(--display); font-size:26px; font-weight:600; margin:2px 2px 12px; }
   .copy-ok{ font-size:12.5px; text-align:center; margin-top:8px; font-weight:600; }
   .empty-hint{ text-align:center; color:var(--faint); font-size:13.5px; padding:18px 0; }
 </style>
@@ -519,9 +525,23 @@
 <script src="app.js"></script>
 
 <script>
+window.APP_VERSION = 'cimientos-v11';
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => navigator.serviceWorker.register('sw.js'));
 }
+// Si hay una versión nueva publicada, recarga sola al volver a la app (nunca con una ventana abierta)
+(function(){
+  async function check(){
+    try {
+      const t = await (await fetch('sw.js?c=' + Date.now(), { cache:'no-store' })).text();
+      const v = (t.match(/CACHE = '([^']+)'/) || [])[1];
+      if (v && v !== window.APP_VERSION && !document.querySelector('.modal-backdrop')) location.reload();
+    } catch(e) {}
+  }
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') check(); });
+  setInterval(check, 10 * 60 * 1000);
+  setTimeout(check, 4000);
+})();
 </script>
 </body>
 </html>

@@ -682,7 +682,10 @@ function App(){
             </div>
           </div>
         </div>
-        <button className="icon-btn" aria-label="Copia de seguridad" onClick={()=>setDataOpen(true)}><Icon name="backup"/></button>
+        <div className="top-actions">
+          <button className={`icon-btn ${tab==='plan'?'on':''}`} aria-label="Plan" onClick={()=>setTab(tab==='plan'?'mes':'plan')}><Icon name="navPlan"/><span>Plan</span></button>
+          <button className="icon-btn" aria-label="Copia de seguridad" onClick={()=>setDataOpen(true)}><Icon name="backup"/></button>
+        </div>
       </div>
 
 
@@ -1031,7 +1034,7 @@ function App(){
         </React.Fragment>
       )}
 
-      {tab==='mercado' && (
+      {tab==='cartera' && (
         <CarteraTab data={data} setData={setData} prices={prices} pricesErr={pricesErr} atlasUrl={atlasUrl}
           onAporta={(h)=>setAddOpen({ type:'expense', catId:(data.categories.find(c=>c.kind==='inversion')||data.categories[0]).id, holdingId:h.id, note:h.name })}/>
       )}
@@ -1040,10 +1043,10 @@ function App(){
       <nav className="bottom-nav">
         <div className="bottom-nav-inner">
           <button className={`nav-btn ${tab==='mes'?'active':''}`} onClick={()=>setTab('mes')}><Icon name="navMes"/>Mes</button>
-          <button className={`nav-btn ${tab==='plan'?'active':''}`} onClick={()=>setTab('plan')}><Icon name="navPlan"/>Plan</button>
-          <button className="fab" aria-label="Apuntar movimiento" onClick={()=>setAddOpen({ type:'expense' })}><Icon name="plus"/></button>
           <button className={`nav-btn ${tab==='historico'?'active':''}`} onClick={()=>setTab('historico')}><Icon name="navAcum"/>Acumulado</button>
-          <button className={`nav-btn ${tab==='mercado'?'active':''}`} onClick={()=>setTab('mercado')}><Icon name="globe"/>Mercado</button>
+          <button className="fab" aria-label="Apuntar movimiento" onClick={()=>setAddOpen({ type:'expense' })}><Icon name="plus"/></button>
+          <button className={`nav-btn ${tab==='cartera'?'active':''}`} onClick={()=>setTab('cartera')}><Icon name="trend"/>Cartera</button>
+          <a className="nav-btn" href={atlasUrl} target="_blank" rel="noopener"><Icon name="globe"/>Mercado</a>
         </div>
       </nav>
 
@@ -1693,6 +1696,7 @@ function CarteraTab({ data, setData, prices, pricesErr, atlasUrl, openAdd, onApo
 
   return (
     <React.Fragment>
+      <div className="tab-title">Cartera</div>
       {holdings.length===0 ? (
         <div className="cart-empty">
           <div className="cart-empty-title">Tu cartera, en directo</div>
@@ -1754,11 +1758,7 @@ function CarteraTab({ data, setData, prices, pricesErr, atlasUrl, openAdd, onApo
         </>
       )}
 
-      <a className="atlas-card" href={atlasUrl} target="_blank" rel="noopener">
-        <Icon name="globe"/>
-        <span><b>Estudio de mercado</b><small>Abre Atlas: carteras por perfil de riesgo y análisis de ETFs</small></span>
-      </a>
-      <div className="data-hint" style={{marginTop:10}}>Los precios vienen de Yahoo Finance y se actualizan cada 30 minutos en horario de mercado. Los fondos publican su valor una vez al día. No es asesoramiento financiero.</div>
+      <div className="data-hint" style={{marginTop:14}}>Los precios vienen de Yahoo Finance y se actualizan cada 30 minutos en horario de mercado. Los fondos publican su valor una vez al día. No es asesoramiento financiero.</div>
 
       {open && <HoldingDetail item={open} prices={prices} data={data} setData={setData} onClose={()=>setOpenId(null)} onEdit={()=>setForm(open.h)} onAporta={()=>onAporta(open.h, open.s)}/>}
       {form && <HoldingForm holding={form} prices={prices} existing={holdings} onClose={()=>setForm(null)}
