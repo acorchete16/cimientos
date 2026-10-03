@@ -22,19 +22,43 @@ async function yget(path) {
   throw last;
 }
 
-// Prefiere cotizaciones en euros en bolsas europeas
-const EXCH_PREF = ['GER', 'AMS', 'MIL', 'PAR', 'FRA', 'STU', 'MUN', 'BER', 'DUS', 'HAM', 'LSE', 'NMS', 'NYQ'];
+// Prefiere cotizaciones en euros en bolsas líquidas (Xetra, Ámsterdam, Milán, París) y exige que tengan historial
+const EXCH_PREF = ['GER', 'AMS', 'MIL', 'PAR', 'EBS', 'FRA', 'MUN', 'BER', 'DUS', 'HAM', 'STU', 'LSE', 'NMS', 'NYQ', 'NGM', 'ASE'];
+const SUFFIX_PREF = ['.DE', '.AS', '.MI', '.PA', '.SW', '.F', '.L', ''];
+const rankQ = (q) => {
+  const ie = EXCH_PREF.indexOf(q.exchange), is = SUFFIX_PREF.findIndex(sf => sf ? q.symbol.endsWith(sf) : !q.symbol.includes('.'));
+  const isinLike = /^[A-Z]{2}[A-Z0-9]{9}[0-9]\./.test(q.symbol) ? 50 : 0; // "IE00….SG" suelen venir sin historial
+  return (ie < 0 ? 30 : ie) + (is < 0 ? 10 : is) + isinLike;
+};
+async function hasHistory(symbol) {
+  try {
+    const r = await chart(symbol, '3mo', '1d');
+    return pts(r).length >= 20;
+  } catch { return false; }
+}
+async function searchQuotes(q) {
+  const j = await yget(`/v1/finance/search?q=${encodeURIComponent(q)}&quotesCount=15&newsCount=0`);
+  return (j.quotes || []).filter(x => x.symbol);
+}
 async function resolveSymbol(item, prev) {
   if (item.symbol) return item.symbol;
-  if (prev && prev.symbol) return prev.symbol;
-  const j = await yget(`/v1/finance/search?q=${encodeURIComponent(item.isin)}&quotesCount=10&newsCount=0`);
-  const qs = (j.quotes || []).filter(q => q.symbol);
-  if (!qs.length) throw new Error(`Sin resultados para ${item.isin}`);
-  qs.sort((a, b) => {
-    const ia = EXCH_PREF.indexOf(a.exchange), ib = EXCH_PREF.indexOf(b.exchange);
-    return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib);
-  });
-  return qs[0].symbol;
+  if (prev && prev.symbol && (prev.daily || []).length >= 20) return prev.symbol;
+  let cands = await searchQuotes(item.isin);
+  // Busca también por nombre para encontrar cotizaciones con ticker (VWCE.DE en vez de IE00….SG)
+  const nm = (cands.find(c => c.longname || c.shortname) || {});
+  const name = nm.longname || nm.shortname || (item.name && item.name !== item.isin ? item.name : null);
+  if (name) {
+    try {
+      const more = await searchQuotes(name.replace(/\(.*?\)/g, '').trim());
+      const type = nm.quoteType;
+      cands = cands.concat(more.filter(m => !type || m.quoteType === type));
+    } catch {}
+  }
+  const seen = new Set(); cands = cands.filter(c => !seen.has(c.symbol) && seen.add(c.symbol));
+  cands.sort((a, b) => rankQ(a) - rankQ(b));
+  for (const c of cands.slice(0, 8)) { if (await hasHistory(c.symbol)) return c.symbol; await sleep(300); }
+  if (cands.length) return cands[0].symbol;
+  throw new Error(`Sin resultados para ${item.isin}`);
 }
 
 const pts = (r) => {
