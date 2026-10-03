@@ -1,0 +1,51 @@
+name: Seguir un producto nuevo
+
+# La app abre una incidencia "Seguir <ISIN>" ya rellenada; al enviarla, esto lo añade a la lista de precios.
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  contents: write
+  issues: write
+
+concurrency:
+  group: precios
+  cancel-in-progress: false
+
+jobs:
+  seguir:
+    if: github.event.issue.user.login == github.repository_owner && startsWith(github.event.issue.title, 'Seguir')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      - id: add
+        env:
+          ISSUE_TITLE: ${{ github.event.issue.title }}
+          ISSUE_BODY: ${{ github.event.issue.body }}
+        run: node scripts/add-isin.mjs
+      - run: node scripts/fetch-prices.mjs
+      - name: Guardar
+        run: |
+          git config user.name "precios-bot"
+          git config user.email "precios-bot@users.noreply.github.com"
+          git add data/watchlist.json data/prices.json
+          git diff --cached --quiet || git commit -m "Seguir ${{ steps.add.outputs.isins }}"
+          git pull --rebase origin main
+          git push
+      - name: Responder y cerrar
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISINS: ${{ steps.add.outputs.isins }}
+        run: |
+          MSG=$(node -e '
+            const p = require("./data/prices.json"); const ids = (process.env.ISINS||"").split(",").filter(Boolean);
+            if (!ids.length) { console.log("No he encontrado ningún ISIN en la incidencia. Formato: dos letras + 10 caracteres, por ejemplo IE00B4L5Y983."); process.exit(0); }
+            console.log(ids.map(id => { const it = p.items[id], er = p.errors[id];
+              if (it && !er) return `✅ ${id}: conectado como ${it.symbol} (${it.longName || it.name}), ${it.price} ${it.currency}. Abre la app en un par de minutos.`;
+              return `⚠️ ${id}: no he encontrado su precio en Yahoo Finance (${er || "sin datos"}). En la app puedes seguir con valor manual.`; }).join("\n"));
+          ')
+          gh issue comment ${{ github.event.issue.number }} --repo ${{ github.repository }} --body "$MSG"
+          gh issue close ${{ github.event.issue.number }} --repo ${{ github.repository }}

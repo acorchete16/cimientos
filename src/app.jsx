@@ -426,6 +426,17 @@ function App(){
   useEffect(()=>{ try{ navigator.storage && navigator.storage.persist && navigator.storage.persist(); }catch(e){} }, []);
   const [backupMsg, setBackupMsg] = useState(null);
   const { prices, err: pricesErr } = usePrices();
+  useEffect(()=>{
+    if (!prices || !(data.holdings||[]).length) return;
+    const toLink = (data.holdings||[]).filter(h=>h.initUnits==null && priceIdOf(h, prices));
+    if (!toLink.length) return;
+    setData(d=>({ ...d, holdings:(d.holdings||[]).map(h=>{
+      if (h.initUnits!=null || !priceIdOf(h, prices)) return h;
+      const st = holdingStats({ ...h, priceId:null, isin:null }, d.txns, null); // valor manual actual
+      const live = liveOf(h, prices);
+      return { ...h, priceId: priceIdOf(h, prices), initUnits: st.value / live.priceEUR, linkedAt: todayISO(), trackRequested: null };
+    }) }));
+  }, [prices]);
   const markBackup = () => setData(d=>({ ...d, meta:{ ...(d.meta||{}), lastBackup:new Date().toISOString() } }));
   const quickBackup = async () => {
     try { await shareBackup(data); markBackup(); setBackupMsg('Copia guardada'); setTimeout(()=>setBackupMsg(null), 2500); }
@@ -484,7 +495,12 @@ function App(){
     }
   };
   const saveScanned = (list) => {
-    setData(d=>({ ...d, txns:[...d.txns, ...list.map(t=>({ ...t, id:uid(), via:'scan' }))] }));
+    const withUnits = list.map(t=>{
+      if (!t.holdingId) return t;
+      const h = (data.holdings||[]).find(x=>x.id===t.holdingId); const live = h ? liveOf(h, prices) : null;
+      return live ? { ...t, unitPrice: live.priceEUR, units: Number(t.amount)/live.priceEUR } : t;
+    });
+    setData(d=>({ ...d, txns:[...d.txns, ...withUnits.map(t=>({ ...t, id:uid(), via:'scan' }))] }));
     setScan(null);
     try{ navigator.vibrate && navigator.vibrate(12); }catch(e){}
     setBackupMsg(list.length===1 ? 'Movimiento guardado' : `${list.length} movimientos guardados`); setTimeout(()=>setBackupMsg(null), 2500);
@@ -1056,6 +1072,8 @@ function App(){
           categories={data.categories}
           usage={usage}
           onScan={startScan}
+          holdings={data.holdings||[]}
+          lastHoldingId={(([...data.txns].reverse().find(t=>t.holdingId))||{}).holdingId}
           onClose={()=>setAddOpen(null)}
           onSave={(t)=>{ addOrUpdateTxn(t); setAddOpen(null); try{ navigator.vibrate && navigator.vibrate(12); }catch(e){} }}
           onDelete={addOpen.id ? ()=>{ deleteTxn(addOpen.id); setAddOpen(null); } : undefined}
@@ -1073,7 +1091,7 @@ function App(){
       {aiKeyOpen && <AIKeyModal onClose={()=>{ setAiKeyOpen(false); pendingFiles.current=null; }}
         onConnected={()=>{ setAiKeyOpen(false); const f = pendingFiles.current; pendingFiles.current=null; if (f) startScan(f); else { setBackupMsg('Lectura de tickets activada'); setTimeout(()=>setBackupMsg(null), 2500); } }}/>}
       {scan && scan.status==='loading' && <ScanLoading previews={scan.previews}/>}
-      {scan && scan.status==='review' && <ScanReviewModal result={scan.result} categories={data.categories} existing={data.txns} onClose={()=>setScan(null)} onSave={saveScanned}/>}
+      {scan && scan.status==='review' && <ScanReviewModal result={scan.result} categories={data.categories} existing={data.txns} holdings={data.holdings||[]} onClose={()=>setScan(null)} onSave={saveScanned}/>}
       {summaryMonth && <MonthSummaryModal stats={monthStats(data, summaryMonth)} prev={monthStats(data, addMonths(summaryMonth,-1))} catById={catById}
         onClose={closeSummary} onOpenMonth={()=>{ setMonth(summaryMonth); setTab('mes'); closeSummary(); }}/>}
       {goalEdit && <GoalModal goal={goalEdit} onClose={()=>setGoalEdit(null)} onSave={(g)=>{ saveGoal(g); setGoalEdit(null); }} onDelete={goalEdit.id ? ()=>{ deleteGoal(goalEdit.id); setGoalEdit(null); } : null}/>}
@@ -1086,7 +1104,7 @@ function App(){
 function parseAmount(str){ return Number((str||'').replace(',', '.')) || 0; }
 function amountToStr(n){ if(n==null || n==='') return ''; const v = Math.round(Number(n)*100)/100; return String(v).replace('.', ','); }
 
-function AddTxnModal({ initial, categories, usage, onClose, onSave, onDelete, onScan }){
+function AddTxnModal({ initial, categories, usage, onClose, onSave, onDelete, onScan, holdings=[], lastHoldingId }){
   const scanRef = useRef(null);
   const isEdit = !!initial.id;
   const rank = (c) => (c.kind==='gasto' && !c.fixed) ? 0 : (c.kind==='gasto' ? 1 : 2);
@@ -1098,6 +1116,7 @@ function AddTxnModal({ initial, categories, usage, onClose, onSave, onDelete, on
   const [catId, setCatId] = useState(initial.catId || (initial.type==='income' ? incomeOpts[0].id : expenseOpts[0]?.id));
   const [note, setNote] = useState(initial.note || '');
   const [date, setDate] = useState(initial.date || todayISO());
+  const [holdingId, setHoldingId] = useState(initial.holdingId || (initial.id ? null : (lastHoldingId && holdings.some(h=>h.id===lastHoldingId) ? lastHoldingId : (holdings[0]||{}).id)) || null);
   const firstRun = useRef(true);
 
   useEffect(()=>{
@@ -1120,10 +1139,12 @@ function AddTxnModal({ initial, categories, usage, onClose, onSave, onDelete, on
   const n = parseAmount(amount);
   const submit = () => {
     if(!n || n<=0 || !catId) return;
-    onSave({ ...(isEdit ? { id: initial.id } : {}), ...(initial.goalId ? { goalId: initial.goalId } : {}), ...(initial.holdingId ? { holdingId: initial.holdingId } : {}), type, amount:n, catId, note:note.trim(), date });
+    onSave({ ...(isEdit ? { id: initial.id } : {}), ...(initial.goalId ? { goalId: initial.goalId } : {}), holdingId: (type==='expense' && isInvest && holdingId) ? holdingId : undefined, type, amount:n, catId, note:note.trim(), date });
   };
   const cat = options.find(o=>o.id===catId);
-  const goalHint = initial.goalId ? ' · para tu objetivo' : initial.holdingId ? ' · se suma a tu cartera' : '';
+  const isInvest = type==='expense' && !!cat && cat.kind==='inversion';
+  const selHolding = isInvest ? holdings.find(h=>h.id===holdingId) : null;
+  const goalHint = initial.goalId ? ' · para tu objetivo' : selHolding ? ` · ${selHolding.name}` : '';
   const dateLabel = date===todayISO() ? 'Hoy' : dayLabel(date);
   const [ip, dp] = amount.split(',');
   const intPart = ip ? new Intl.NumberFormat('es-ES').format(Number(ip)) : '0';
@@ -1158,6 +1179,18 @@ function AddTxnModal({ initial, categories, usage, onClose, onSave, onDelete, on
         ))}
       </div>
 
+      {isInvest && holdings.length>0 && (
+        <div className="qa-hold">
+          <div className="qa-hold-label">¿En qué producto de tu cartera?</div>
+          <div className="qa-cats" style={{paddingTop:0}}>
+            {holdings.map(h=>(
+              <div key={h.id} className={`chip ${holdingId===h.id?'active':''}`} style={{'--chip-color':'var(--invest)'}} onClick={()=>setHoldingId(h.id)}>{h.name.length>26 ? h.name.slice(0,25)+'…' : h.name}</div>
+            ))}
+            <div className={`chip ${!holdingId?'active':''}`} onClick={()=>setHoldingId(null)}>Ninguno</div>
+          </div>
+        </div>
+      )}
+      {isInvest && holdings.length===0 && <div className="data-hint" style={{textAlign:'left', margin:'-4px 0 10px'}}>Añade tus fondos y ETFs en la pestaña Cartera y las aportaciones se sumarán solas a cada uno.</div>}
       <div className="qa-meta">
         <input type="text" value={note} onChange={e=>setNote(e.target.value)} placeholder={type==='income' ? 'Nota: bizum de Jon' : 'Nota (opcional)'}/>
         <label className="qa-date"><Icon name="calendar"/>{dateLabel}
@@ -1433,9 +1466,10 @@ function ScanLoading({ previews }){
   );
 }
 
-function ScanReviewModal({ result, categories, existing, onClose, onSave }){
+function ScanReviewModal({ result, categories, existing, onClose, onSave, holdings=[] }){
   const dupOf = (it) => existing.some(t=>t.date===it.date && Math.abs(Number(t.amount)-it.amount)<0.005 && t.type===it.type);
-  const [items, setItems] = useState(()=>result.items.map(it=>({ ...it, key:uid(), dup:dupOf(it), on:!dupOf(it) })));
+  const invIds = new Set(categories.filter(c=>c.kind==='inversion').map(c=>c.id));
+  const [items, setItems] = useState(()=>result.items.map(it=>({ ...it, key:uid(), dup:dupOf(it), on:!dupOf(it), holdingId: invIds.has(it.catId) && holdings[0] ? holdings[0].id : null })));
   const upd = (k, patch) => setItems(list=>list.map(it=>it.key===k ? { ...it, ...patch } : it));
   const chosen = items.filter(it=>it.on && it.amount>0);
   const total = chosen.reduce((s,it)=>s+(it.type==='income'?1:-1)*it.amount,0);
@@ -1468,12 +1502,21 @@ function ScanReviewModal({ result, categories, existing, onClose, onSave }){
                 <input type="date" value={it.date} onChange={e=>e.target.value && upd(it.key,{date:e.target.value})}/>
                 <button className="scan-type" onClick={()=>{ const type = it.type==='expense'?'income':'expense'; upd(it.key,{ type, catId: type==='income' ? 'otros' : (categories.find(c=>c.kind==='gasto')||categories[0]).id }); }}>{it.type==='expense'?'Gasto':'Ingreso'}</button>
               </div>
+              {it.type==='expense' && invIds.has(it.catId) && holdings.length>0 && (
+                <div className="scan-row2">
+                  <span className="scan-dot" style={{background:'var(--invest)'}}/>
+                  <select value={it.holdingId||''} onChange={e=>upd(it.key,{holdingId:e.target.value||null})}>
+                    {holdings.map(h=><option key={h.id} value={h.id}>{h.name}</option>)}
+                    <option value="">Sin producto</option>
+                  </select>
+                </div>
+              )}
               {it.dup && <div className="scan-dup">Ya tienes un movimiento igual ese día. Lo he desmarcado por si está repetido.</div>}
             </div>
           );
         })}
       </div>
-      {items.length>0 && <button className="btn btn-primary" disabled={!chosen.length} onClick={()=>onSave(chosen.map(({key,dup,on,...t})=>t))}>
+      {items.length>0 && <button className="btn btn-primary" disabled={!chosen.length} onClick={()=>onSave(chosen.map(({key,dup,on,holdingId,...t})=>({ ...t, ...(t.type==='expense' && invIds.has(t.catId) && holdingId ? { holdingId } : {}) })))}>
         {chosen.length ? `Guardar ${chosen.length} · ${total<0?'−':'+'}${fmtExact(Math.abs(total))}` : 'Marca algún movimiento'}
       </button>}
       <button className="btn btn-ghost" onClick={onClose}>{items.length ? 'Descartar' : 'Cerrar'}</button>
@@ -1527,9 +1570,19 @@ const sinceLabel = (iso) => {
   return `hace ${Math.round(h/24)} días`;
 };
 
+const ISIN_RE = /^[A-Z]{2}[A-Z0-9]{9}[0-9]$/;
+const priceIdOf = (h, prices) => {
+  if (!prices || !prices.items) return null;
+  if (h.priceId && prices.items[h.priceId]) return h.priceId;
+  const isin = (h.isin||'').toUpperCase();
+  return isin && prices.items[isin] ? isin : null;
+};
+const trackUrl = (isin, name) => `https://github.com/acorchete16/cimientos/issues/new?title=${encodeURIComponent('Seguir ' + isin)}&body=${encodeURIComponent(`isin: ${isin}\nnombre: ${name||''}\n\nSolo tienes que pulsar "Submit new issue". En 1-2 minutos la app empezará a mostrar sus datos en vivo.`)}`;
+
 function liveOf(h, prices){
-  if (!prices || !h.priceId) return null;
-  const p = prices.items && prices.items[h.priceId];
+  const pid = priceIdOf(h, prices);
+  if (!pid) return null;
+  const p = prices.items[pid];
   if (!p || p.price==null) return null;
   const fx = prices.fx;
   const price = toEUR(p.price, p.currency, fx), prev = toEUR(p.prevClose, p.currency, fx);
@@ -1735,7 +1788,7 @@ function CarteraTab({ data, setData, prices, pricesErr, atlasUrl, openAdd, onApo
                   <div className="hold-dot" style={{background:color}}/>
                   <div className="hold-mid">
                     <div className="hold-name">{h.name}</div>
-                    <div className="hold-sub">{HOLDING_TYPES[h.type]||'Inversión'}{s.live ? <> · <span className={dpct>=0?'up':'down'}>{dpct!=null ? pctStr(dpct) : ''}</span> hoy</> : ' · valor manual'}</div>
+                    <div className="hold-sub">{HOLDING_TYPES[h.type]||'Inversión'}{s.live ? <> · <span className={dpct>=0?'up':'down'}>{dpct!=null ? pctStr(dpct) : ''}</span> hoy</> : h.trackRequested ? ' · conectando…' : h.isin ? <> · <span style={{color:'var(--amber)'}}>sin conectar</span></> : ' · valor manual'}</div>
                   </div>
                   {spark && <Sparkline points={spark} up={spark[spark.length-1][1]>=spark[0][1]}/>}
                   <div className="hold-right">
@@ -1810,9 +1863,22 @@ function HoldingDetail({ item, prices, data, setData, onClose, onEdit, onAporta 
           </div>
         </>
       ) : (
-        <div className="notice soft" style={{marginTop:6}}>
-          <div className="notice-text">{h.isin ? 'Todavía no sigo el precio de este producto en directo. Pídeme que lo añada y se actualizará solo.' : 'Sin ISIN no puedo seguir su precio en directo. Actualiza su valor a mano cuando lo mires en tu broker.'}</div>
-        </div>
+        h.isin && ISIN_RE.test(h.isin) ? (
+          <div className="connect-box">
+            <div className="connect-title">{h.trackRequested ? 'Conectando…' : 'Conecta sus datos en vivo'}</div>
+            <div className="notice-text">{h.trackRequested
+              ? 'Ya lo has pedido. En 1-2 minutos aparecerán precio y gráficos; si tarda más, vuelve a pulsar.'
+              : 'Se abre GitHub con todo rellenado: solo pulsa "Submit new issue". En 1-2 minutos la app empezará a seguir su precio.'}</div>
+            <a className="btn btn-primary" href={trackUrl(h.isin, h.name)} target="_blank" rel="noopener"
+              onClick={()=>setData(d=>({ ...d, holdings:(d.holdings||[]).map(x=>x.id===h.id?{...x, trackRequested: new Date().toISOString()}:x) }))}>
+              <Icon name="globe"/>{h.trackRequested ? 'Volver a pedir' : 'Conectar datos en vivo'}
+            </a>
+          </div>
+        ) : (
+          <div className="notice soft" style={{marginTop:6}}>
+            <div className="notice-text">Sin ISIN no puedo seguir su precio en directo. Edita la inversión y añade su ISIN (lo ves en Trade Republic, en la ficha del producto).</div>
+          </div>
+        )
       )}
 
       <div className="data-section">Tu posición</div>
@@ -1904,6 +1970,11 @@ function HoldingForm({ holding, prices, existing, onClose, onSave, onDelete }){
   const [inv, setInv] = useState(holding.initInvested!=null ? String(holding.initInvested) : '');
   const [val, setVal] = useState('');
   const pick = (p) => { setPriceId(p.id); setCustom(false); setName(p.name); setIsin(p.isin||''); setType(typeFromYahoo(p.type)); };
+  const typedIsin = isin.trim().toUpperCase();
+  useEffect(()=>{
+    if (!custom || !prices || !prices.items) return;
+    if (ISIN_RE.test(typedIsin) && prices.items[typedIsin] && !usedIds.has(typedIsin)) { pick(prices.items[typedIsin]); }
+  }, [typedIsin]);
   const sel = priceId && prices && prices.items[priceId];
   const live = sel ? liveOf({ priceId }, prices) : null;
   const invN = Number(String(inv).replace(',','.')), valN = Number(String(val).replace(',','.'));
@@ -1941,7 +2012,7 @@ function HoldingForm({ holding, prices, existing, onClose, onSave, onDelete }){
         <>
           <div className="field"><label>Nombre</label><input type="text" value={name} onChange={e=>setName(e.target.value)} placeholder="Ej. Vanguard Global Stock"/></div>
           <div className="field-row">
-            <div className="field"><label>ISIN (opcional)</label><input type="text" value={isin} onChange={e=>setIsin(e.target.value)} placeholder="IE00…" autoCapitalize="characters"/></div>
+            <div className="field"><label>ISIN</label><input type="text" value={isin} onChange={e=>setIsin(e.target.value)} placeholder="IE00…" autoCapitalize="characters"/></div>
             <div className="field"><label>Tipo</label><select value={type} onChange={e=>setType(e.target.value)}>{Object.entries(HOLDING_TYPES).map(([k,v])=><option key={k} value={k}>{v}</option>)}</select></div>
           </div>
         </>
@@ -1950,6 +2021,8 @@ function HoldingForm({ holding, prices, existing, onClose, onSave, onDelete }){
         <>
           <div className="field"><label>¿Cuánto has metido en total? (€)</label><input type="number" inputMode="decimal" value={inv} onChange={e=>setInv(e.target.value)} placeholder="Suma de todas tus aportaciones"/></div>
           <div className="field"><label>{isEdit ? 'Valor actual (déjalo vacío para no cambiarlo)' : '¿Cuánto vale ahora? (€)'}</label><input type="number" inputMode="decimal" value={val} onChange={e=>setVal(e.target.value)} placeholder="Lo que pone en tu broker"/></div>
+          {custom && ISIN_RE.test(typedIsin) && !live && <div className="data-hint" style={{textAlign:'left', margin:'-4px 0 12px'}}>Este ISIN aún no tiene datos en vivo. Cuando lo guardes podrás conectarlo con un toque.</div>}
+          {custom && typedIsin && !ISIN_RE.test(typedIsin) && <div className="data-hint" style={{textAlign:'left', margin:'-4px 0 12px', color:'var(--warn)'}}>Un ISIN tiene 12 caracteres: 2 letras y 10 números o letras (ej. IE00B4L5Y983).</div>}
           {live && valN>0 && <div className="goal-preview">Con el precio de ahora ({fmt2(live.priceEUR)}) son unas <b className="num">{(valN/live.priceEUR).toLocaleString('es-ES',{maximumFractionDigits:3})}</b> participaciones. A partir de aquí el valor se actualiza solo.</div>}
           <button className="btn btn-primary" disabled={!canSave} onClick={submit}>{isEdit ? 'Guardar cambios' : 'Añadir a mi cartera'}</button>
         </>
