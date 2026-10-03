@@ -15,19 +15,34 @@ concurrency:
 
 jobs:
   seguir:
-    if: github.event.issue.user.login == github.repository_owner && startsWith(github.event.issue.title, 'Seguir')
+    if: startsWith(github.event.issue.title, 'Seguir')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - id: permiso
+        name: Comprobar quién lo pide
+        env:
+          AUTOR: ${{ github.event.issue.user.login }}
+          DUENO: ${{ github.repository_owner }}
+        run: |
+          ok=false
+          if [ "${AUTOR,,}" = "${DUENO,,}" ]; then ok=true; fi
+          if grep -v '^\s*#' .github/pueden-seguir.txt 2>/dev/null | tr -d ' \r@' | grep -qixF -- "$AUTOR"; then ok=true; fi
+          echo "ok=$ok" >> "$GITHUB_OUTPUT"
+          echo "Autor: $AUTOR -> permitido: $ok"
       - uses: actions/setup-node@v4
+        if: steps.permiso.outputs.ok == 'true'
         with: { node-version: 20 }
       - id: add
+        if: steps.permiso.outputs.ok == 'true'
         env:
           ISSUE_TITLE: ${{ github.event.issue.title }}
           ISSUE_BODY: ${{ github.event.issue.body }}
         run: node scripts/add-isin.mjs
       - run: node scripts/fetch-prices.mjs
+        if: steps.permiso.outputs.ok == 'true'
       - name: Guardar
+        if: steps.permiso.outputs.ok == 'true'
         run: |
           git config user.name "precios-bot"
           git config user.email "precios-bot@users.noreply.github.com"
@@ -36,6 +51,7 @@ jobs:
           git pull --rebase origin main
           git push
       - name: Responder y cerrar
+        if: steps.permiso.outputs.ok == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           ISINS: ${{ steps.add.outputs.isins }}
