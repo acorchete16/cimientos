@@ -1,2 +1,3 @@
 # Usuarios de GitHub (uno por línea) que pueden añadir productos con "Conectar datos en vivo".
 # El dueño del repositorio siempre puede. Las líneas con # se ignoran.
+lucymortimore-star
