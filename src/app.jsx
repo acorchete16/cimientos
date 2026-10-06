@@ -592,8 +592,8 @@ function App(){
   const deleteTxn = (id) => setData(d=>({ ...d, txns: d.txns.filter(t=>t.id!==id) }));
   const addCategory = (cat) => setData(d=>({ ...d, categories:[...d.categories, cat] }));
   const updateCategory = (id, patch) => setData(d=>({ ...d, categories: d.categories.map(c=> c.id===id ? {...c, ...patch} : c) }));
-  const setPlanSueldo = (v) => setData(d=>({ ...d, plan:{ ...d.plan, sueldo: Number(v)||0 } }));
-  const setPlanCat = (catId, v) => setData(d=>({ ...d, plan:{ ...d.plan, categories:{ ...d.plan.categories, [catId]: v===''?0:Number(v) } } }));
+  const setPlanSueldo = (v) => setData(d=>({ ...d, plan:{ ...d.plan, sueldo: toNum(v) } }));
+  const setPlanCat = (catId, v) => setData(d=>({ ...d, plan:{ ...d.plan, categories:{ ...d.plan.categories, [catId]: toNum(v) } } }));
   const deleteCategory = (id) => setData(d=>({
     ...d,
     categories: d.categories.filter(c=>c.id!==id),
@@ -940,8 +940,8 @@ function App(){
             <div className="summary-row" style={{padding:'0 0 10px 0', border:'none'}}>
               <span className="l" style={{fontSize:13, fontWeight:700, color:'var(--ink)'}}>Sueldo previsto</span>
             </div>
-            <input type="number" inputMode="decimal" value={data.plan.sueldo||''} placeholder="0"
-              onChange={e=>setPlanSueldo(e.target.value)}
+            <NumInput value={data.plan.sueldo||''} placeholder="0"
+              onValue={setPlanSueldo}
               style={{width:'100%', padding:'10px 11px', borderRadius:10, border:'1px solid var(--border)', background:'var(--surface-2)', color:'var(--ink)', fontFamily:"'Archivo',sans-serif", fontSize:18, fontWeight:600}}/>
             {(()=>{ const asig = Object.values(data.plan.categories||{}).reduce((a,b)=>a+Number(b||0),0); const libre=(Number(data.plan.sueldo)||0)-asig; return (
               <div className="plan-split"><span>Asignado <b className="num">{fmt(asig)}</b></span><span style={{color: libre<0?'var(--danger)':undefined}}>{libre<0 ? 'Te pasas en ' : 'Sin asignar '}<b className="num" style={{color: libre<0?'var(--danger)':'var(--accent)'}}>{fmt(Math.abs(libre))}</b></span></div>
@@ -960,8 +960,8 @@ function App(){
                       <div className="cat-icon" style={{background:cat.color+'22', color:cat.color}}><Icon name={cat.icon}/></div>
                       <div className="cat-mid"><div className="cat-name">{cat.name}</div>{cat.kind==='gasto' && <div className="tag-fixed">{cat.fixed ? 'Fijo' : 'Día a día'}</div>}</div>
                       <label className="plan-input">
-                        <input type="number" inputMode="decimal" value={(data.plan.categories||{})[cat.id] || ''} placeholder="0"
-                          onChange={e=>setPlanCat(cat.id, e.target.value)}/>
+                        <NumInput value={(data.plan.categories||{})[cat.id] || ''} placeholder="0"
+                          onValue={v=>setPlanCat(cat.id, v)}/>
                         <span>€</span>
                       </label>
                     </div>
@@ -1099,6 +1099,26 @@ function App(){
 
     </div>
   );
+}
+
+// Números escritos a la española o inglesa: "12,5", "1.234,56", "1,234.56", "12.5", "1.500" (=1500)
+function toNum(v){
+  if (typeof v === 'number') return isFinite(v) ? v : 0;
+  let s = String(v==null?'':v).replace(/[\s€]/g,'').replace(/[^0-9.,-]/g,'');
+  if (!s) return 0;
+  const lc = s.lastIndexOf(','), ld = s.lastIndexOf('.');
+  if (lc>=0 && ld>=0) { const dec = lc>ld ? ',' : '.'; const th = dec===',' ? '.' : ','; s = s.split(th).join('').replace(dec,'.'); }
+  else if (lc>=0) { const parts = s.split(','); s = parts.length>2 ? parts.join('') : s.replace(',','.'); }
+  else if (ld>=0) { const parts = s.split('.'); if (parts.length>2 || (parts[1].length===3 && /^-?[1-9]/.test(parts[0]))) s = parts.join(''); }
+  const n = parseFloat(s); return isFinite(n) ? n : 0;
+}
+const cleanNumText = (t) => String(t).replace(/[^0-9.,]/g,'');
+// Campo numérico que acepta coma (type=number en iPhone la rechaza)
+function NumInput({ value, onValue, ...rest }){
+  const [txt, setTxt] = useState(value==null||value===''||value===0 ? '' : String(value).replace('.',','));
+  useEffect(()=>{ if (toNum(txt) !== toNum(value)) setTxt(value==null||value===''||value===0 ? '' : String(value).replace('.',',')); }, [value]);
+  return <input type="text" inputMode="decimal" autoComplete="off" {...rest} value={txt}
+    onChange={e=>{ const t = cleanNumText(e.target.value); setTxt(t); onValue(t===''?0:toNum(t)); }}/>;
 }
 
 function parseAmount(str){ return Number((str||'').replace(',', '.')) || 0; }
@@ -1278,10 +1298,10 @@ function GoalModal({ goal, onClose, onSave, onDelete }){
   const isEdit = !!goal.id;
   const defDate = addMonths(thisMonthKey(), 12);
   const [name, setName] = useState(goal.name || '');
-  const [target, setTarget] = useState(goal.target!=null ? String(goal.target) : '');
+  const [target, setTarget] = useState(goal.target!=null ? String(goal.target).replace('.',',') : '');
   const [date, setDate] = useState(goal.date || defDate);
-  const [initial, setInitial] = useState(goal.initial ? String(goal.initial) : '');
-  const t = Number(target)||0, i = Number(initial)||0;
+  const [initial, setInitial] = useState(goal.initial ? String(goal.initial).replace('.',',') : '');
+  const t = toNum(target), i = toNum(initial);
   const months = monthIndex(date) - monthIndex(thisMonthKey());
   const per = months>0 ? Math.max(0,t-i)/months : null;
   const submit = () => {
@@ -1292,10 +1312,10 @@ function GoalModal({ goal, onClose, onSave, onDelete }){
     <Modal title={isEdit ? 'Editar objetivo' : 'Nuevo objetivo'} onClose={onClose}>
       <div className="field"><label>¿Para qué ahorras?</label><input autoFocus type="text" value={name} onChange={e=>setName(e.target.value)} placeholder="Ej. Viaje verano 2027"/></div>
       <div className="field-row">
-        <div className="field"><label>Cuánto necesitas</label><input type="number" inputMode="decimal" value={target} onChange={e=>setTarget(e.target.value)} placeholder="1500"/></div>
+        <div className="field"><label>Cuánto necesitas</label><input type="text" inputMode="decimal" value={target} onChange={e=>setTarget(cleanNumText(e.target.value))} placeholder="1500"/></div>
         <div className="field"><label>Para cuándo</label><input type="month" value={date} min={addMonths(thisMonthKey(),1)} onChange={e=>e.target.value && setDate(e.target.value)}/></div>
       </div>
-      <div className="field"><label>¿Ya tienes algo apartado para esto?</label><input type="number" inputMode="decimal" value={initial} onChange={e=>setInitial(e.target.value)} placeholder="0"/></div>
+      <div className="field"><label>¿Ya tienes algo apartado para esto?</label><input type="text" inputMode="decimal" value={initial} onChange={e=>setInitial(cleanNumText(e.target.value))} placeholder="0"/></div>
       {t>0 && (
         <div className="goal-preview">
           {per!=null
@@ -1490,7 +1510,7 @@ function ScanReviewModal({ result, categories, existing, onClose, onSave, holdin
                 <input className="scan-note" value={it.note} onChange={e=>upd(it.key,{note:e.target.value})} placeholder="Concepto"/>
                 <div className="scan-amt">
                   <span className={it.type==='income'?'inc':''}>{it.type==='income'?'+':'−'}</span>
-                  <input type="number" inputMode="decimal" value={it.amount} onChange={e=>upd(it.key,{amount:Math.abs(Number(e.target.value))||0})}/>
+                  <NumInput value={it.amount} onValue={v=>upd(it.key,{amount:Math.abs(v)})}/>
                   <span>€</span>
                 </div>
               </div>
@@ -1947,12 +1967,12 @@ function HoldingDetail({ item, prices, data, setData, onClose, onEdit, onAporta 
 }
 
 function ValueModal({ h, s, onClose, onSave }){
-  const [v, setV] = useState(String(Math.round(s.value*100)/100));
-  const n = Number(String(v).replace(',','.'));
+  const [v, setV] = useState(String(Math.round(s.value*100)/100).replace('.',','));
+  const n = toNum(v);
   return (
     <Modal title={s.live ? 'Ajustar al valor del broker' : 'Actualizar valor'} onClose={onClose}>
       <div className="ai-intro">{s.live ? 'Si el valor que ves en Trade Republic no coincide con el de la app, pon aquí el del broker y recalculo tus participaciones. A partir de ahí sigue el precio solo.' : 'Mira cuánto vale ahora en tu broker y ponlo aquí.'}</div>
-      <div className="field"><label>Valor actual en tu broker (€)</label><input type="number" inputMode="decimal" autoFocus value={v} onChange={e=>setV(e.target.value)}/></div>
+      <div className="field"><label>Valor actual en tu broker (€)</label><input type="text" inputMode="decimal" autoFocus value={v} onChange={e=>setV(cleanNumText(e.target.value))}/></div>
       <button className="btn btn-primary" disabled={!(n>0)} onClick={()=>onSave(n)}>Guardar</button>
     </Modal>
   );
@@ -1967,7 +1987,7 @@ function HoldingForm({ holding, prices, existing, onClose, onSave, onDelete }){
   const [name, setName] = useState(holding.name || '');
   const [isin, setIsin] = useState(holding.isin || '');
   const [type, setType] = useState(holding.type || 'etf');
-  const [inv, setInv] = useState(holding.initInvested!=null ? String(holding.initInvested) : '');
+  const [inv, setInv] = useState(holding.initInvested!=null ? String(holding.initInvested).replace('.',',') : '');
   const [val, setVal] = useState('');
   const pick = (p) => { setPriceId(p.id); setCustom(false); setName(p.name); setIsin(p.isin||''); setType(typeFromYahoo(p.type)); };
   const typedIsin = isin.trim().toUpperCase();
@@ -1977,7 +1997,7 @@ function HoldingForm({ holding, prices, existing, onClose, onSave, onDelete }){
   }, [typedIsin]);
   const sel = priceId && prices && prices.items[priceId];
   const live = sel ? liveOf({ priceId }, prices) : null;
-  const invN = Number(String(inv).replace(',','.')), valN = Number(String(val).replace(',','.'));
+  const invN = toNum(inv), valN = toNum(val);
   const canSave = name.trim() && invN>=0 && (isEdit || valN>0);
   const submit = () => {
     const base = { ...(isEdit?{id:holding.id}:{}), name:name.trim(), isin:isin.trim().toUpperCase()||null, type, priceId: custom ? null : priceId, initInvested: invN||0 };
@@ -2019,8 +2039,8 @@ function HoldingForm({ holding, prices, existing, onClose, onSave, onDelete }){
       )}
       {(priceId || custom || isEdit) && (
         <>
-          <div className="field"><label>¿Cuánto has metido en total? (€)</label><input type="number" inputMode="decimal" value={inv} onChange={e=>setInv(e.target.value)} placeholder="Suma de todas tus aportaciones"/></div>
-          <div className="field"><label>{isEdit ? 'Valor actual (déjalo vacío para no cambiarlo)' : '¿Cuánto vale ahora? (€)'}</label><input type="number" inputMode="decimal" value={val} onChange={e=>setVal(e.target.value)} placeholder="Lo que pone en tu broker"/></div>
+          <div className="field"><label>¿Cuánto has metido en total? (€)</label><input type="text" inputMode="decimal" value={inv} onChange={e=>setInv(cleanNumText(e.target.value))} placeholder="Suma de todas tus aportaciones"/></div>
+          <div className="field"><label>{isEdit ? 'Valor actual (déjalo vacío para no cambiarlo)' : '¿Cuánto vale ahora? (€)'}</label><input type="text" inputMode="decimal" value={val} onChange={e=>setVal(cleanNumText(e.target.value))} placeholder="Lo que pone en tu broker"/></div>
           {custom && ISIN_RE.test(typedIsin) && !live && <div className="data-hint" style={{textAlign:'left', margin:'-4px 0 12px'}}>Este ISIN aún no tiene datos en vivo. Cuando lo guardes podrás conectarlo con un toque.</div>}
           {custom && typedIsin && !ISIN_RE.test(typedIsin) && <div className="data-hint" style={{textAlign:'left', margin:'-4px 0 12px', color:'var(--warn)'}}>Un ISIN tiene 12 caracteres: 2 letras y 10 números o letras (ej. IE00B4L5Y983).</div>}
           {live && valN>0 && <div className="goal-preview">Con el precio de ahora ({fmt2(live.priceEUR)}) son unas <b className="num">{(valN/live.priceEUR).toLocaleString('es-ES',{maximumFractionDigits:3})}</b> participaciones. A partir de aquí el valor se actualiza solo.</div>}
