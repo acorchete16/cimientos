@@ -92,8 +92,9 @@ const monthLabel = (mk) => { const [y,m]=mk.split('-').map(Number); return `${MO
 const monthLabelShort = (mk) => { const [y,m]=mk.split('-').map(Number); return `${MONTHS_ES[m-1].slice(0,3)} ${y}`; };
 const uid = () => Math.random().toString(36).slice(2,9);
 const clamp=(n,a,b)=>Math.max(a,Math.min(b,n));
-const fmtExact = (n) => new Intl.NumberFormat('es-ES',{style:'currency',currency:'EUR',minimumFractionDigits: Number.isInteger(Number(n))?0:2, maximumFractionDigits:2}).format(n||0);
-const fmt = (n) => new Intl.NumberFormat('es-ES',{style:'currency',currency:'EUR',maximumFractionDigits:0}).format(n||0);
+// Importes: sin decimales si son enteros, con los céntimos si los hay (12 € / 12,50 €)
+const fmtExact = (n) => { const v = Math.round((Number(n)||0)*100)/100; return new Intl.NumberFormat('es-ES',{style:'currency',currency:'EUR',minimumFractionDigits: Number.isInteger(v)?0:2, maximumFractionDigits:2}).format(v); };
+const fmt = fmtExact;
 
 function seed(){
   const mk = thisMonthKey();
@@ -1000,7 +1001,7 @@ function App(){
                       <span className="goal-status" style={{color: pr.done ? 'var(--accent)' : pr.behind>1 ? 'var(--warn)' : 'var(--muted)'}}>
                         {pr.done ? 'Conseguido' : pr.monthsLeft<=0 ? `Ha vencido el plazo · faltan ${fmt(pr.remaining)}` : pr.behind>1 ? `Vas ${fmt(pr.behind)} por detrás · aparta ${fmt(pr.perMonth)}/mes` : `Vas bien · aparta ${fmt(pr.perMonth)}/mes`}
                       </span>
-                      {!pr.done && <button className="goal-add" onClick={()=>setAddOpen({ type:'expense', catId:savingsCatId, goalId:g.id, note:g.name, amount: Math.round(pr.perMonth) || undefined })}>Aportar</button>}
+                      {!pr.done && <button className="goal-add" onClick={()=>setAddOpen({ type:'expense', catId:savingsCatId, goalId:g.id, note:g.name, amount: Math.round(pr.perMonth*100)/100 || undefined })}>Aportar</button>}
                     </div>
                   </div>
                 );
