@@ -1613,7 +1613,7 @@ function liveOf(h, prices){
 }
 
 function holdingStats(h, txns, prices){
-  const contribs = txns.filter(t=>t.holdingId===h.id && t.type==='expense');
+  const contribs = txns.filter(t=>t.holdingId===h.id && t.type==='expense' && (!h.importedThrough || t.date > h.importedThrough));
   const invested = Number(h.initInvested||0) + contribs.reduce((s,t)=>s+Number(t.amount),0);
   const live = liveOf(h, prices);
   let units = null, value;
@@ -1732,10 +1732,150 @@ Máximo 5 elementos en top, paises y sectores.`;
   return { ...info, sources, at: new Date().toISOString() };
 }
 
+// ---- Importar el CSV de movimientos de Trade Republic (se lee solo en el móvil) ----
+function parseCSV(text){
+  text = text.replace(/^﻿/, '');
+  const first = text.split(/\r?\n/).find(l=>l.trim()) || '';
+  const count = (ch) => first.split(ch).length - 1;
+  const delim = [';', ',', '\t'].sort((a,b)=>count(b)-count(a))[0];
+  const rows = []; let row = [], cell = '', q = false;
+  for (let i=0;i<text.length;i++){
+    const c = text[i];
+    if (q) { if (c==='"') { if (text[i+1]==='"') { cell+='"'; i++; } else q=false; } else cell+=c; continue; }
+    if (c==='"') q = true;
+    else if (c===delim) { row.push(cell); cell=''; }
+    else if (c==='\n' || c==='\r') { if (c==='\r' && text[i+1]==='\n') i++; row.push(cell); if (row.some(x=>x.trim()!=='')) rows.push(row); row=[]; cell=''; }
+    else cell += c;
+  }
+  row.push(cell); if (row.some(x=>x.trim()!=='')) rows.push(row);
+  return { rows, delim };
+}
+const TR_FIELDS = {
+  date:    ['datetime','timestamp','date','fecha','datum','data','zeit','time'],
+  type:    ['type','tipo','typ','transaction type','category','categoria','kategorie','art'],
+  subtype: ['subtype','subtipo','subtyp'],
+  isin:    ['isin'],
+  name:    ['name','instrument','asset','title','nombre','titulo','bezeichnung','wertpapier','description','descripcion','beschreibung'],
+  shares:  ['shares','quantity','qty','units','cantidad','participaciones','titulos','acciones','stuck','stück','anzahl','quantidade'],
+  price:   ['price','precio','kurs','preco','preço'],
+  amount:  ['amount','total','importe','betrag','valor','value','cantidad eur','monto'],
+  fee:     ['fee','fees','comision','comisión','gebuhr','gebühr','taxa','costs'],
+  tax:     ['tax','taxes','impuesto','impuestos','steuer','steuern','imposto'],
+};
+const normH = (s) => String(s||'').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/[_\-().]/g,' ').replace(/\s+/g,' ').trim();
+function mapHeaders(header){
+  const H = header.map(normH), used = new Set(), map = {};
+  const pick = (field, exact) => {
+    for (const k of TR_FIELDS[field].map(normH)) {
+      const i = H.findIndex((h,j)=>!used.has(j) && (exact ? h===k : (h===k || h.split(' ').includes(k) || h.startsWith(k+' '))));
+      if (i>=0) { map[field]=i; used.add(i); return; }
+    }
+  };
+  ['isin','subtype','date','shares','price','fee','tax','amount','type','name'].forEach(f=>pick(f,true));
+  ['isin','subtype','date','shares','price','fee','tax','amount','type','name'].forEach(f=>{ if (map[f]==null) pick(f,false); });
+  return map;
+}
+function parseTradeRepublic(text){
+  const { rows, delim } = parseCSV(text);
+  if (rows.length < 2) return { error:'El archivo está vacío o no es un CSV.' };
+  const header = rows[0], map = mapHeaders(header);
+  if (map.isin==null) { // columna sin nombre claro: la que contiene ISIN (p. ej. "symbol")
+    let best = -1, bestN = 0;
+    header.forEach((_,j)=>{ const n = rows.slice(1).filter(r=>ISIN_RE.test(String(r[j]||'').trim().toUpperCase())).length; if (n>bestN) { bestN=n; best=j; } });
+    if (best>=0) { map.isin = best; Object.keys(map).forEach(k=>{ if (k!=='isin' && map[k]===best) delete map[k]; }); }
+  }
+  if (map.isin==null || (map.shares==null && map.amount==null)) return { error:'No reconozco las columnas de este archivo.', header };
+  const body = rows.slice(1);
+  const commaDec = delim!==',' && body.some(r=>[map.shares,map.amount,map.price].some(i=>i!=null && /^-?[\d.]*\d,\d+$/.test(String(r[i]||'').trim())));
+  const num = (v) => { let s = String(v==null?'':v).replace(/[\s€$%]/g,''); if (!s) return 0; s = commaDec ? s.replace(/\./g,'').replace(',','.') : s.replace(/,/g,''); const n = parseFloat(s); return isFinite(n) ? n : 0; };
+  const date = (v) => { const s = String(v||'').trim(); let m = s.match(/^(\d{4})-(\d{2})-(\d{2})/); if (m) return `${m[1]}-${m[2]}-${m[3]}`; m = s.match(/^(\d{1,2})[./](\d{1,2})[./](\d{4})/); return m ? `${m[3]}-${m[2].padStart(2,'0')}-${m[1].padStart(2,'0')}` : ''; };
+  const SELL = /sell|verkauf|venta|vender|venda|sale|sold/i;
+  const ops = []; let ignored = 0; const ignoredTypes = {};
+  for (const r of body) {
+    const isin = String(r[map.isin]||'').trim().toUpperCase();
+    const typeTxt = [r[map.type], r[map.subtype]].filter(Boolean).join(' ');
+    let shares = map.shares!=null ? num(r[map.shares]) : 0;
+    const amount = map.amount!=null ? num(r[map.amount]) : 0;
+    const price = map.price!=null ? Math.abs(num(r[map.price])) : 0;
+    if (!shares && price && amount && !/divid|interest|zins|interes|ausschutt|distrib/i.test(typeTxt)) shares = Math.abs(amount)/price;
+    if (!ISIN_RE.test(isin) || !shares) { ignored++; const k = (typeTxt||'otros').trim().toLowerCase(); ignoredTypes[k]=(ignoredTypes[k]||0)+1; continue; }
+    const sell = shares<0 || SELL.test(typeTxt);
+    const fee = map.fee!=null ? Math.abs(num(r[map.fee])) : 0;
+    const cash = Math.abs(amount) || Math.abs(shares)*price;
+    ops.push({ isin, name: map.name!=null ? String(r[map.name]||'').trim() : '', date: map.date!=null ? date(r[map.date]) : '', sell, shares: Math.abs(shares), cash, fee, price: price || (cash/Math.abs(shares)) });
+  }
+  ops.sort((a,b)=> (a.date||'').localeCompare(b.date||''));
+  const by = {};
+  for (const o of ops) {
+    const p = by[o.isin] || (by[o.isin] = { isin:o.isin, name:'', units:0, invested:0, buys:0, sells:0, lastDate:'', lastPrice:0, first:o.date });
+    if (o.name && !p.name) p.name = o.name;
+    if (o.sell) { const avg = p.units>0 ? p.invested/p.units : 0; const q = Math.min(o.shares, p.units); p.units -= q; p.invested -= avg*q; p.sells++; }
+    else { p.units += o.shares; p.invested += o.cash + o.fee; p.buys++; }
+    if (o.date >= p.lastDate) { p.lastDate = o.date; p.lastPrice = o.price; }
+  }
+  const products = Object.values(by).map(p=>({ ...p, units: Math.round(p.units*1e6)/1e6, invested: Math.round(Math.max(0,p.invested)*100)/100 }));
+  const through = ops.reduce((m,o)=> o.date>m ? o.date : m, '');
+  return { products, ops: ops.length, ignored, ignoredTypes, through, header, map };
+}
+const guessType = (isin, name) => /fund|fonds|fondo|index p|acc eur/i.test(name||'') && !/etf/i.test(name||'') ? 'fondo' : /etf|ucits|ishares|vanguard|xtrackers|amundi|spdr|invesco|lyxor/i.test(name||'') ? 'etf' : /^US|^CA|^KY/.test(isin) ? 'accion' : 'etf';
+
+function TRImportModal({ prices, holdings, onClose, onImport }){
+  const fileRef = useRef(null);
+  const [res, setRes] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const read = async (f) => {
+    if (!f) return; setBusy(true);
+    try { setRes(parseTradeRepublic(await f.text())); } catch(e) { setRes({ error:'No he podido leer el archivo.' }); }
+    setBusy(false);
+  };
+  const byIsin = (isin) => holdings.find(h=>(h.isin||'').toUpperCase()===isin);
+  const open = res && !res.error ? res.products.filter(p=>p.units>0.000001) : [];
+  const closed = res && !res.error ? res.products.filter(p=>!(p.units>0.000001)) : [];
+  return (
+    <Modal title="Importar de Trade Republic" onClose={onClose}>
+      {!res && (<>
+        <div className="ai-intro">En la app de Trade Republic: <b>Perfil</b> (arriba a la derecha) → <b>Extractos</b> → <b>Exportación de transacciones</b>. Elige desde el principio hasta hoy, pulsa <b>Crear</b> y guárdalo o compártelo. Luego elígelo aquí.</div>
+        <div className="ai-intro" style={{marginTop:8}}>El archivo se lee solo en este móvil: no se sube a ningún sitio y no hace falta ninguna contraseña.</div>
+        <input ref={fileRef} type="file" accept=".csv,text/csv,text/plain,text/comma-separated-values,application/vnd.ms-excel" style={{display:'none'}} onChange={e=>read(e.target.files[0])}/>
+        <button className="btn btn-primary" disabled={busy} onClick={()=>fileRef.current && fileRef.current.click()}>{busy ? 'Leyendo…' : 'Elegir el archivo CSV'}</button>
+      </>)}
+      {res && res.error && (<>
+        <div className="ai-intro" style={{color:'var(--danger)'}}>{res.error}</div>
+        {res.header && <div className="data-hint" style={{textAlign:'left'}}>Columnas que trae: {res.header.join(' · ')}. Pásale esto a Claude y lo ajusta.</div>}
+        <button className="btn btn-ghost" onClick={()=>setRes(null)}>Probar con otro archivo</button>
+      </>)}
+      {res && !res.error && (<>
+        <div className="ai-intro">{res.ops} operaciones de compra y venta{res.through ? <> hasta el {dayLabel(res.through).toLowerCase()}</> : null}{res.ignored ? <> · {res.ignored} movimientos que no son compras ni ventas (dividendos, intereses, ingresos…) no cambian tu cartera</> : null}.</div>
+        {open.length===0 && <div className="ai-intro">No hay productos con participaciones abiertas en este archivo.</div>}
+        <div className="cat-list" style={{margin:'10px 0'}}>
+          {open.map(p=>{
+            const h = byIsin(p.isin); const live = liveOf({ isin:p.isin, priceId: h && h.priceId }, prices);
+            const val = live ? p.units*live.priceEUR : p.units*p.lastPrice;
+            return (
+              <div key={p.isin} className="hold-row" style={{cursor:'default'}}>
+                <div className="hold-mid">
+                  <div className="hold-name">{(h && h.name) || p.name || p.isin}</div>
+                  <div className="hold-sub">{p.units.toLocaleString('es-ES',{maximumFractionDigits:4})} part. · metido {fmt(p.invested)} · {h ? 'actualiza el que tienes' : 'nuevo'}{live ? '' : ' · sin precio en vivo'}</div>
+                </div>
+                <div className="hold-right"><div className="num hold-val">{fmt(val)}</div><div className={`num hold-gain ${val-p.invested>=0?'up':'down'}`}>{val-p.invested>=0?'+':''}{fmt(val-p.invested)}</div></div>
+              </div>
+            );
+          })}
+        </div>
+        {closed.length>0 && <div className="data-hint" style={{textAlign:'left'}}>Ya vendidos del todo (no se añaden): {closed.map(p=>p.name||p.isin).join(', ')}.</div>}
+        <div className="data-hint" style={{textAlign:'left'}}>Lo que apuntaste en la app para estos productos hasta esa fecha se sustituye por lo del archivo, para no contarlo dos veces. Lo posterior se mantiene.</div>
+        <button className="btn btn-primary" disabled={open.length===0} onClick={()=>onImport(open, res.through)}>Importar {open.length} {open.length===1?'producto':'productos'}</button>
+        <button className="btn btn-ghost" onClick={()=>setRes(null)}>Elegir otro archivo</button>
+      </>)}
+    </Modal>
+  );
+}
+
 function CarteraTab({ data, setData, prices, pricesErr, atlasUrl, openAdd, onAporta }){
   const [range, setRange] = useState('1A');
   const [openId, setOpenId] = useState(null);
   const [form, setForm] = useState(null);
+  const [trOpen, setTrOpen] = useState(false);
   const holdings = data.holdings || [];
   const stats = holdings.map((h,i)=>({ h, s: holdingStats(h, data.txns, prices), color: HOLDING_COLORS[i % HOLDING_COLORS.length] }));
   const total = stats.reduce((a,x)=>a+x.s.value,0);
@@ -1776,6 +1916,7 @@ function CarteraTab({ data, setData, prices, pricesErr, atlasUrl, openAdd, onApo
           <div className="cart-empty-title">Tu cartera, en directo</div>
           <div className="cart-empty-sub">Dime qué fondos, ETFs o acciones tienes, cuánto has metido y cuánto vale ahora. A partir de ahí, la app sigue el precio sola y te enseña cuánto ganas o pierdes cada día.</div>
           <button className="btn btn-primary" onClick={()=>setForm({})}>Añadir mi primera inversión</button>
+          <button className="btn btn-ghost" onClick={()=>setTrOpen(true)}>Importar de Trade Republic</button>
         </div>
       ) : (
         <>
@@ -1799,7 +1940,7 @@ function CarteraTab({ data, setData, prices, pricesErr, atlasUrl, openAdd, onApo
             </div>
           )}
 
-          <div className="section-label"><span>Tus inversiones</span><a onClick={()=>setForm({})}>Añadir</a></div>
+          <div className="section-label"><span>Tus inversiones</span><span style={{display:'flex',gap:14}}><a onClick={()=>setTrOpen(true)}>Importar TR</a><a onClick={()=>setForm({})}>Añadir</a></span></div>
           <div className="cat-list">
             {stats.map(({h,s,color})=>{
               const spark = s.live ? seriesFor(s.live, '1M') : null;
@@ -1834,6 +1975,18 @@ function CarteraTab({ data, setData, prices, pricesErr, atlasUrl, openAdd, onApo
 
       <div className="data-hint" style={{marginTop:14}}>Los precios vienen de Yahoo Finance y se actualizan cada 30 minutos en horario de mercado. Los fondos publican su valor una vez al día. No es asesoramiento financiero.</div>
 
+      {trOpen && <TRImportModal prices={prices} holdings={holdings} onClose={()=>setTrOpen(false)}
+        onImport={(list, through)=>{ setData(d=>{
+          let hs = [...(d.holdings||[])];
+          list.forEach(p=>{
+            const i = hs.findIndex(h=>(h.isin||'').toUpperCase()===p.isin);
+            const patch = { isin:p.isin, initUnits:p.units, initInvested:p.invested, importedThrough: through || p.lastDate, manualValue: Math.round(p.units*p.lastPrice*100)/100, manualDate: through || p.lastDate, source:'tr', importedAt: todayISO() };
+            const pid = priceIdOf({ isin:p.isin }, prices); if (pid) patch.priceId = pid;
+            if (i>=0) hs[i] = { ...hs[i], ...patch };
+            else hs.push({ id:uid(), created: todayISO(), name: p.name || p.isin, type: guessType(p.isin, p.name), ...patch });
+          });
+          return { ...d, holdings: hs };
+        }); setTrOpen(false); }}/>}
       {open && <HoldingDetail item={open} prices={prices} data={data} setData={setData} onClose={()=>setOpenId(null)} onEdit={()=>setForm(open.h)} onAporta={()=>onAporta(open.h, open.s)}/>}
       {form && <HoldingForm holding={form} prices={prices} existing={holdings} onClose={()=>setForm(null)}
         onSave={(h)=>{ setData(d=>{ const list = d.holdings||[]; return { ...d, holdings: h.id && list.some(x=>x.id===h.id) ? list.map(x=>x.id===h.id?{...x,...h}:x) : [...list, { ...h, id:uid(), created: todayISO() }] }; }); setForm(null); }}
