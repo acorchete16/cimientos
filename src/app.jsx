@@ -49,7 +49,6 @@ const Icon = ({ name, ...p }) => {
 
 const STORAGE_KEY = "cimientos_simple_v2";
 const OLD_KEY = "cimientos_simple_v1";
-const THEME_KEY = "cimientos_simple_theme";
 const COLORS = ["#FF9F43","#8E9BFF","#C77DFF","#EF4B55","#FF6FA5","#5EC8D8","#8FD66A","#FFD166","#B48CFF","#A7B0BF"];
 const OLD_DEFAULT_COLORS = {"#5B7B9A":"#8E9BFF","#B8792B":"#FF9F43","#D08A3E":"#FFD166","#7A6BAE":"#5EC8D8","#3E8FA6":"#C77DFF","#C25C8A":"#FF6FA5","#B34438":"#EF4B55","#2E8F6E":"#8FD66A","#B8862B":"#B48CFF","#1F6F54":"#8FD66A","#8A8676":"#A7B0BF","#4E7D6B":"#7EE0B5"};
 const DEFAULT_CATS = [
@@ -322,6 +321,84 @@ function MoonMark(){
 }
 const isHalloweenNight = () => todayISO().slice(5)==='10-31';
 
+// ---- Temas ----
+const THEME_KEY = 'cimientos_theme';
+const THEMES = [
+  { id:'halloween', name:'Halloween', desc:'Luna, telaraña, murciélagos y luz de vela.', sw:['#140E1C','#FF7A1A','#B48CFF','#8FD66A'] },
+  { id:'navidad', name:'Navidad', desc:'Noche de pino, oro, nieve y una bola en el árbol.', sw:['#0B1613','#F0B43C','#E5383B','#7BD69A'] },
+  { id:'clasico', name:'Clásico', desc:'Los colores de siempre, sin adornos.', sw:['#140E1C','#FF7A1A','#B48CFF','#8FD66A'] },
+];
+const THEME_BG = { halloween:'#140E1C', navidad:'#0B1613', clasico:'#140E1C' };
+const getTheme = () => { try{ const t = localStorage.getItem(THEME_KEY); if (THEME_BG[t]) return t; }catch(e){} return 'halloween'; };
+function applyTheme(t){
+  document.documentElement.setAttribute('data-theme', t);
+  const m = document.querySelector('meta[name="theme-color"]'); if (m) m.setAttribute('content', THEME_BG[t] || '#140E1C');
+}
+function festiveLabel(theme){
+  const d = todayISO().slice(5);
+  if (theme==='halloween') return d==='10-31' ? 'Noche de Halloween' : '';
+  if (theme==='navidad') return ({'12-24':'Nochebuena','12-25':'Navidad','12-28':'Inocentes','12-31':'Nochevieja','01-01':'Año nuevo','01-05':'Noche de Reyes','01-06':'Reyes'})[d] || '';
+  return '';
+}
+function ThemeGlyph({ theme }){
+  if (theme==='navidad') return (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><path d="M12 2v20M3.3 7l17.4 10M3.3 17L20.7 7M9.5 3.5 12 6l2.5-2.5M9.5 20.5 12 18l2.5 2.5M3 10.3l3.4-.9-.9-3.4M21 13.7l-3.4.9.9 3.4M3 13.7l3.4.9-.9 3.4M21 10.3l-3.4-.9.9-3.4"/></svg>);
+  if (theme==='halloween') return (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round"><path d="M16.5 4.5a8.5 8.5 0 1 0 3 12.6 6.8 6.8 0 1 1-3-12.6z"/></svg>);
+  return (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><circle cx="12" cy="12" r="8.5"/><path d="M12 3.5v17" /><path d="M12 3.5a8.5 8.5 0 0 1 0 17z" fill="currentColor" stroke="none"/></svg>);
+}
+function ThemeModal({ theme, onPick, onClose }){
+  return (
+    <Modal title="Tema" onClose={onClose}>
+      <div className="theme-list">
+        {THEMES.map(t=>(
+          <button key={t.id} className={`theme-opt ${theme===t.id?'on':''}`} onClick={()=>onPick(t.id)}>
+            <div className="theme-sw" style={{background:t.sw[0]}}>{t.sw.slice(1).map((c,i)=><span key={i} style={{background:c}}/>)}</div>
+            <div className="theme-txt"><b>{t.name}</b><small>{t.desc}</small></div>
+            {theme===t.id && <Icon name="check" style={{width:16,height:16,color:'var(--amber)'}}/>}
+          </button>
+        ))}
+      </div>
+    </Modal>
+  );
+}
+function StarMark(){
+  return (
+    <svg className="moon-mark star-mark" viewBox="0 0 40 40" aria-hidden="true">
+      <defs><radialGradient id="sg" cx="0.5" cy="0.5" r="0.5"><stop offset="0.35" stopColor="#FFE7A8" stopOpacity="0.45"/><stop offset="1" stopColor="#F0B43C" stopOpacity="0"/></radialGradient></defs>
+      <circle cx="20" cy="20" r="19" fill="url(#sg)"/>
+      <path className="star-body" d="M20 8.5l2.9 7.1 7.6.5-5.9 4.9 1.9 7.4L20 24.3l-6.5 4.1 1.9-7.4-5.9-4.9 7.6-.5z" fill="#FFE2A0"/>
+      <circle className="star s1" cx="6" cy="9" r="0.9" fill="#FFF3D6"/>
+      <circle className="star s2" cx="34" cy="33" r="0.7" fill="#FFF3D6"/>
+      <circle className="star s3" cx="8" cy="31" r="0.6" fill="#FFF3D6"/>
+    </svg>
+  );
+}
+function Bauble(){
+  const [ring, setRing] = useState(0);
+  return (
+    <div className={`spider bauble ${ring?'ring':''}`} key={ring} onClick={(e)=>{ e.stopPropagation(); setRing(r=>r+1); try{ navigator.vibrate && navigator.vibrate([8,40,8]); }catch(_){} }} aria-hidden="true">
+      <div className="spider-thread"/>
+      <svg className="bauble-body" viewBox="0 0 24 30">
+        <defs><radialGradient id="bg1" cx="0.35" cy="0.35" r="0.75"><stop offset="0" stopColor="#FF8A7E"/><stop offset="0.55" stopColor="#D7262E"/><stop offset="1" stopColor="#7E0E16"/></radialGradient></defs>
+        <rect x="9" y="1" width="6" height="4" rx="1" fill="#E9B949"/>
+        <circle cx="12" cy="17" r="10" fill="url(#bg1)"/>
+        <path d="M3.5 15.5q8.5 4 17 0" stroke="#F0C35A" strokeWidth="1.1" fill="none" opacity="0.85"/>
+        <ellipse cx="8.5" cy="12.5" rx="2.2" ry="3.2" fill="#fff" opacity="0.28" transform="rotate(-25 8.5 12.5)"/>
+      </svg>
+      {ring>0 && <div className="sparkles">{[0,1,2,3,4].map(i=><i key={i} style={{'--a':`${i*72}deg`}}/>)}</div>}
+    </div>
+  );
+}
+function Snow(){
+  const flakes = useMemo(()=> Array.from({length:16}, (_,i)=>({
+    left: (i*6.3 + (i%3)*7) % 100, size: 3 + (i*7)%5, dur: 11 + (i*5)%9, delay: -((i*3.7)%14), drift: ((i%2)?1:-1)*(10+(i*3)%18), op: 0.25 + ((i*11)%5)/12,
+  })), []);
+  return (
+    <div className="snow" aria-hidden="true">
+      {flakes.map((f,i)=><i key={i} style={{left:f.left+'%', width:f.size, height:f.size, opacity:f.op, animationDuration:f.dur+'s', animationDelay:f.delay+'s', '--drift':f.drift+'px'}}/>)}
+    </div>
+  );
+}
+
 function catStatus(amt, planAmt, dayFrac){
   if (!planAmt) return { key:'none', color:'var(--faint)', text: amt>0 ? 'Sin presupuesto en el plan' : 'Sin gastos' };
   if (amt > planAmt) return { key:'over', color:'var(--danger)', text:`Te has pasado ${fmt(amt-planAmt)}` };
@@ -413,11 +490,15 @@ function App(){
   const [data, setData] = useState(load);
   const [month, setMonth] = useState(thisMonthKey());
   const [tab, setTab] = useState('mes');
-  const [theme, setTheme] = useState(()=>{ try{ return localStorage.getItem(THEME_KEY)||'system'; }catch(e){ return 'system'; } });
   const [addOpen, setAddOpen] = useState(null); // { type, catId }
   const [addCatOpen, setAddCatOpen] = useState(false);
   const [editCatOpen, setEditCatOpen] = useState(null); // category object
   const [dataOpen, setDataOpen] = useState(false);
+  const [theme, setThemeState] = useState(getTheme);
+  const [themeOpen, setThemeOpen] = useState(false);
+  const setTheme = (t) => { setThemeState(t); applyTheme(t); try{ localStorage.setItem(THEME_KEY, t); }catch(e){} };
+  useEffect(()=>{ applyTheme(theme); }, []);
+  const [maxOpen, setMaxOpen] = useState(false);
   const [syncStatus, setSyncStatus] = useState('local'); // local | syncing | synced | offline
   const dbRef = useRef(null);
   const lastSyncedRef = useRef(null);
@@ -551,10 +632,6 @@ function App(){
     }, 900);
     return () => { if (writeTimer.current) clearTimeout(writeTimer.current); };
   }, [data]);
-  useEffect(()=>{
-    document.documentElement.setAttribute('data-theme', 'dark');
-    try{ localStorage.setItem(THEME_KEY, theme); }catch(e){}
-  }, [theme]);
 
   const catById = (id) => data.categories.find(c=>c.id===id) || INCOME_SOURCES.find(c=>c.id===id) || { name:'Otros', icon:'dots3', color:'#999' };
 
@@ -649,6 +726,16 @@ function App(){
   const varCats = gastoCats.filter(c=>!c.fixed);
   const fixedCats = gastoCats.filter(c=>c.fixed);
   const varIds = new Set(varCats.map(c=>c.id));
+  // "Dar el mes por gastado": completa cada categoría de gasto hasta su presupuesto
+  const maxedTxns = monthTxns.filter(t=>t.auto==='maxed');
+  const maxPreview = gastoCats.map(c=>({ cat:c, plan:planOf(c.id), spent:spentByCat[c.id]||0 }))
+    .filter(x=>x.plan>0 && x.plan - x.spent > 0.004).map(x=>({ ...x, add: Math.round((x.plan-x.spent)*100)/100 }));
+  const applyMaxMonth = () => {
+    const date = isCurrent ? todayISO() : `${month}-${String(daysInMonth).padStart(2,'0')}`;
+    setData(d=>({ ...d, txns: [...d.txns, ...maxPreview.map(x=>({ id:uid(), type:'expense', date, amount:x.add, catId:x.cat.id, note:'Presupuesto completo', auto:'maxed' }))] }));
+    setMaxOpen(false);
+  };
+  const undoMaxMonth = () => setData(d=>({ ...d, txns: d.txns.filter(t=>!(t.auto==='maxed' && monthOf(t.date)===month)) }));
   const fixedSpent = fixedCats.reduce((s,c)=>s+(spentByCat[c.id]||0),0);
   const fixedPlanned = fixedCats.reduce((s,c)=>s+planOf(c.id),0);
   const savePlanned = [...catsByKind('ahorro'),...catsByKind('inversion')].reduce((s,c)=>s+planOf(c.id),0);
@@ -660,12 +747,12 @@ function App(){
   const varTxns = expenseTxnsMonth.filter(t=>varIds.has(t.catId));
   const varSpent = varTxns.reduce((s,t)=>s+Number(t.amount),0);
   const today = todayISO();
-  const spentToday = isCurrent ? varTxns.filter(t=>t.date===today).reduce((s,t)=>s+Number(t.amount),0) : 0;
+  const spentToday = isCurrent ? varTxns.filter(t=>t.date===today && t.auto!=='maxed').reduce((s,t)=>s+Number(t.amount),0) : 0;
   const daysLeft = isCurrent ? daysInMonth - dayNow + 1 : 0;
   const varLeft = varBudget - varSpent;
   const dailyAllowance = isCurrent ? Math.max(0, varBudget - (varSpent - spentToday)) / daysLeft : 0;
   const canSpendToday = dailyAllowance - spentToday;
-  const heroOver = isCurrent && varBudget>0 && varLeft < 0;
+  const heroOver = isCurrent && varBudget>0 && varLeft < -0.005;
   const paceDiff = varSpent - varBudget*dayFrac;
   const projected = isCurrent && dayNow>0 ? (varSpent - spentToday) / Math.max(1, dayNow-1) * daysInMonth : 0;
   const dailyVar = useMemo(()=>{
@@ -683,7 +770,7 @@ function App(){
         <div className="brand">
           <div className="brand-mark">
             <svg viewBox="0 0 30 30" fill="none">
-              <defs><radialGradient id="bm" cx="0.35" cy="0.3" r="0.8"><stop offset="0" stopColor="#FFA04D"/><stop offset="1" stopColor="#E2550A"/></radialGradient></defs>
+              <defs><radialGradient id="bm" cx="0.35" cy="0.3" r="0.8"><stop offset="0" style={{stopColor:'var(--brand-1)'}}/><stop offset="1" style={{stopColor:'var(--brand-2)'}}/></radialGradient></defs>
               <circle cx="15" cy="15" r="14" fill="url(#bm)"/>
               <path d="M8 21h14M10 21v-4.5h10V21M12 16.5V13h6v3.5M13.8 13v-2.6h2.4V13" stroke="#2B1103" strokeWidth="1.7" strokeLinejoin="round" strokeLinecap="round"/>
             </svg>
@@ -701,6 +788,7 @@ function App(){
         </div>
         <div className="top-actions">
           <button className={`icon-btn ${tab==='plan'?'on':''}`} aria-label="Plan" onClick={()=>setTab(tab==='plan'?'mes':'plan')}><Icon name="navPlan"/><span>Plan</span></button>
+          <button className="icon-btn" aria-label="Cambiar tema" onClick={()=>setThemeOpen(true)}><ThemeGlyph theme={theme}/></button>
           <button className="icon-btn" aria-label="Copia de seguridad" onClick={()=>setDataOpen(true)}><Icon name="backup"/></button>
         </div>
       </div>
@@ -728,11 +816,16 @@ function App(){
           </div>
 
           <div className={`hero ${heroOver ? 'over' : ''}`}>
-            <MoonMark/>
-            <Spider/>
+            {theme==='halloween' && <><MoonMark/><Spider/></>}
+            {theme==='navidad' && <><StarMark/><Bauble/></>}
             <div className="hero-inner">
-              {isCurrent && !heroOver && (<>
-                <div className="hero-label">{isHalloweenNight() ? 'Noche de Halloween · hoy puedes gastar' : 'Hoy puedes gastar'}</div>
+              {isCurrent && maxedTxns.length>0 && !heroOver && (<>
+                <div className="hero-label">Mes dado por gastado</div>
+                <div className="hero-huge num"><AnimatedMoney value={ahorroTotal+inversionTotal}/></div>
+                <div className="hero-sub">apartado este mes · los gastos están apuntados al máximo de tu presupuesto. Lo que ahorres o inviertas, apúntalo con +.</div>
+              </>)}
+              {isCurrent && !heroOver && maxedTxns.length===0 && (<>
+                <div className="hero-label">{festiveLabel(theme) ? `${festiveLabel(theme)} · hoy puedes gastar` : 'Hoy puedes gastar'}</div>
                 <div className="hero-huge num"><AnimatedMoney value={Math.max(0, canSpendToday)}/></div>
                 <div className="hero-sub">
                   {canSpendToday < 0
@@ -904,9 +997,21 @@ function App(){
             </div>
           </>)}
 
+          {!isFuture && (maxedTxns.length>0 ? (
+            <div className="max-box done">
+              <div><b>Mes dado por gastado.</b> Los gastos están al máximo del presupuesto ({fmt(maxedTxns.reduce((a,t)=>a+Number(t.amount),0))} añadidos). Apunta solo lo que ahorres o inviertas.</div>
+              <button className="notice-btn" onClick={undoMaxMonth}>Deshacer</button>
+            </div>
+          ) : maxPreview.length>0 && (
+            <button className="max-box" onClick={()=>setMaxOpen(true)}>
+              <div><b>Dar el mes por gastado</b><br/><span className="muted">Pone todos los gastos al máximo de tu presupuesto. Tú solo apuntas lo ahorrado.</span></div>
+              <Icon name="chevR" style={{width:14,height:14,flexShrink:0}}/>
+            </button>
+          ))}
+
           <div className="section-label">Movimientos</div>
           <div className="card txn-card">
-            {recentTxns.length===0 ? <div className="empty-hint">Silencio de cementerio: aún no hay movimientos este mes. Toca el botón naranja para apuntar el primero.</div> : (
+            {recentTxns.length===0 ? <div className="empty-hint">{theme==='halloween' ? 'Silencio de cementerio: aún' : theme==='navidad' ? 'Ni un turrón: aún' : 'Aún'} no hay movimientos este mes. Toca el botón + para apuntar el primero.</div> : (
               txnGroups.map(([day, list])=>(
                 <React.Fragment key={day}>
                   <div className="day-head"><span>{dayLabel(day)}</span><span className="num">{(()=>{ const net=list.reduce((s,t)=>s+(t.type==='income'?1:-1)*Number(t.amount),0); return (net>0?'+':'')+fmt(net); })()}</span></div>
@@ -1056,7 +1161,25 @@ function App(){
           onAporta={(h)=>setAddOpen({ type:'expense', catId:(data.categories.find(c=>c.kind==='inversion')||data.categories[0]).id, holdingId:h.id, note:h.name })}/>
       )}
 
-      <Bats/>
+      {theme==='halloween' && <Bats/>}
+      {theme==='navidad' && <Snow/>}
+      {themeOpen && <ThemeModal theme={theme} onPick={(t)=>{ setTheme(t); setThemeOpen(false); }} onClose={()=>setThemeOpen(false)}/>}
+      {maxOpen && (
+        <Modal title="Dar el mes por gastado" onClose={()=>setMaxOpen(false)}>
+          <div className="ai-intro">Apunto en {monthLabel(month)} lo que falta para llegar al presupuesto de cada gasto. Así el mes cuenta como gastado al máximo y solo tienes que apuntar a mano lo que ahorres o inviertas.</div>
+          <div className="cat-list" style={{margin:'6px 0 12px'}}>
+            {maxPreview.map(x=>(
+              <div key={x.cat.id} className="cat-row" style={{cursor:'default'}}>
+                <div className="cat-icon" style={{background:x.cat.color+'22', color:x.cat.color}}><Icon name={x.cat.icon}/></div>
+                <div className="cat-mid"><div className="cat-name">{x.cat.name}</div><div className="tag-fixed">{x.spent>0 ? `llevas ${fmt(x.spent)} de ${fmt(x.plan)}` : `presupuesto ${fmt(x.plan)}`}</div></div>
+                <div className="num" style={{fontWeight:700}}>+{fmt(x.add)}</div>
+              </div>
+            ))}
+          </div>
+          <div className="data-hint" style={{textAlign:'left'}}>Se apuntan como «Presupuesto completo». Puedes deshacerlo cuando quieras desde la pestaña Mes.</div>
+          <button className="btn btn-primary" onClick={applyMaxMonth}>Apuntar {fmt(maxPreview.reduce((a,x)=>a+x.add,0))}</button>
+        </Modal>
+      )}
       <nav className="bottom-nav">
         <div className="bottom-nav-inner">
           <button className={`nav-btn ${tab==='mes'?'active':''}`} onClick={()=>setTab('mes')}><Icon name="navMes"/>Mes</button>
@@ -1134,6 +1257,8 @@ function AddTxnModal({ initial, categories, usage, onClose, onSave, onDelete, on
   const incomeOpts = useMemo(()=> sortByUse(INCOME_SOURCES), [usage]);
   const [type, setType] = useState(initial.type || 'expense');
   const [amount, setAmount] = useState(amountToStr(initial.amount));
+  // Si el importe viene ya puesto (fijo, aportación, editar...), la primera tecla lo sustituye
+  const [fresh, setFresh] = useState(()=> amountToStr(initial.amount)!=='');
   const [catId, setCatId] = useState(initial.catId || (initial.type==='income' ? incomeOpts[0].id : expenseOpts[0]?.id));
   const [note, setNote] = useState(initial.note || '');
   const [date, setDate] = useState(initial.date || todayISO());
@@ -1148,6 +1273,7 @@ function AddTxnModal({ initial, categories, usage, onClose, onSave, onDelete, on
   const options = type==='expense' ? expenseOpts : incomeOpts;
   const press = (k) => {
     try{ navigator.vibrate && navigator.vibrate(6); }catch(e){}
+    if (fresh) { setFresh(false); setAmount(k==='del' ? '' : k===',' ? '0,' : k); return; }
     setAmount(prev=>{
       if (k==='del') return prev.slice(0,-1);
       if (k===',') return prev.includes(',') ? prev : (prev==='' ? '0,' : prev+',');
@@ -1186,7 +1312,8 @@ function AddTxnModal({ initial, categories, usage, onClose, onSave, onDelete, on
         </>
       )}
       <div className="qa-amount">
-        <div className={`v num ${amount===''?'empty':''}`} style={{color: amount!=='' && type==='income' ? 'var(--accent)' : undefined}}>
+        <div className={`v num ${amount===''?'empty':''} ${fresh?'fresh':''}`} style={{color: amount!=='' && type==='income' ? 'var(--accent)' : undefined}}
+          onClick={()=>{ if (amount!=='') { setAmount(''); setFresh(false); } }}>
           {intPart}{amount.includes(',') && <>,{dp}</>}<span className="cur">€</span>
         </div>
         <div className="hint">{cat ? (type==='expense' ? `en ${cat.name}${goalHint}` : `de ${cat.name}`) : ''}</div>
